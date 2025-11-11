@@ -114,13 +114,14 @@
         <h3>🛠️ 数据管理操作</h3>
       </template>
       
-      <el-row :gutter="24" justify="center">
+      <!-- 第一行：数据导入和导出 -->
+      <el-row :gutter="24">
         <!-- 数据导出 -->
-        <el-col :span="10">
+        <el-col :span="12">
           <div class="operation-section">
             <h4>📤 数据导出</h4>
             <p>导出数据库数据到文件</p>
-            
+
             <el-form-item label="导出格式">
               <el-select v-model="exportFormat" style="width: 100%">
                 <el-option label="JSON" value="json" />
@@ -128,17 +129,17 @@
                 <el-option label="Excel" value="xlsx" />
               </el-select>
             </el-form-item>
-            
+
             <el-form-item label="数据集合">
               <el-select v-model="exportCollection" style="width: 100%">
-                <el-option label="全部集合" value="all" />
-                <el-option label="配置数据（用于演示系统）" value="config_only" />
+                <el-option label="配置和报告（用于迁移）" value="config_and_reports" />
+                <el-option label="配置数据（用于演示系统，已脱敏）" value="config_only" />
                 <el-option label="分析结果" value="analysis_results" />
                 <el-option label="用户配置" value="user_configs" />
                 <el-option label="操作日志" value="operation_logs" />
               </el-select>
             </el-form-item>
-            
+
             <el-button @click="exportData" :loading="exporting">
               <el-icon><Download /></el-icon>
               导出数据
@@ -146,92 +147,91 @@
           </div>
         </el-col>
 
-        <!-- 数据备份 -->
-        <el-col :span="10">
+        <!-- 数据导入 -->
+        <el-col :span="12">
           <div class="operation-section">
-            <h4>💾 数据备份</h4>
-            <p>创建数据库完整备份</p>
-            
-            <el-form-item label="备份名称">
-              <el-input v-model="backupName" placeholder="输入备份名称" />
+            <h4>📥 数据导入</h4>
+            <p>从导出文件导入数据</p>
+
+            <el-form-item label="选择文件">
+              <el-upload
+                ref="uploadRef"
+                :auto-upload="false"
+                :limit="1"
+                :on-change="handleFileChange"
+                :on-remove="handleFileRemove"
+                accept=".json"
+                drag
+              >
+                <el-icon class="el-icon--upload"><Upload /></el-icon>
+                <div class="el-upload__text">
+                  拖拽文件到此处或<em>点击上传</em>
+                </div>
+                <template #tip>
+                  <div class="el-upload__tip">
+                    仅支持 JSON 格式的导出文件
+                  </div>
+                </template>
+              </el-upload>
             </el-form-item>
-            
-            <el-button @click="createBackup" :loading="backingUp">
-              <el-icon><FolderAdd /></el-icon>
-              创建备份
+
+            <el-form-item label="导入选项">
+              <el-checkbox v-model="importOverwrite">
+                覆盖现有数据
+              </el-checkbox>
+              <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+                ⚠️ 勾选后将删除现有数据再导入
+              </div>
+            </el-form-item>
+
+            <el-button
+              type="primary"
+              @click="importData"
+              :loading="importing"
+              :disabled="!importFile"
+            >
+              <el-icon><Upload /></el-icon>
+              导入数据
             </el-button>
-            
-            <el-button @click="loadBackups">
-              <el-icon><Refresh /></el-icon>
-              刷新列表
-            </el-button>
+          </div>
+        </el-col>
+      </el-row>
+
+      <!-- 第二行：数据备份和还原说明 -->
+      <el-row :gutter="24" style="margin-top: 24px">
+        <el-col :span="24">
+          <div class="operation-section">
+            <h4>💾 数据备份与还原</h4>
+            <el-alert
+              title="请使用命令行工具进行备份和还原"
+              type="info"
+              :closable="false"
+            >
+              <template #default>
+                <div style="line-height: 1.8;">
+                  <p style="margin: 8px 0;">由于数据量较大，Web 界面备份体验较差，建议使用 MongoDB 原生工具：</p>
+                  <div style="background: #f5f7fa; padding: 12px; border-radius: 4px; margin: 8px 0;">
+                    <p style="margin: 4px 0; font-weight: bold;">📦 备份命令：</p>
+                    <code style="display: block; margin: 4px 0; color: #409eff;">
+                      mongodump --uri="mongodb://localhost:27017" --db=tradingagents --out=./backup --gzip
+                    </code>
+                    <p style="margin: 12px 0 4px 0; font-weight: bold;">🔄 还原命令：</p>
+                    <code style="display: block; margin: 4px 0; color: #409eff;">
+                      mongorestore --uri="mongodb://localhost:27017" --db=tradingagents --gzip ./backup/tradingagents
+                    </code>
+                  </div>
+                  <p style="margin: 8px 0; font-size: 12px; color: #909399;">
+                    💡 提示：请根据实际的 MongoDB 连接信息修改命令中的 URI
+                  </p>
+                </div>
+              </template>
+            </el-alert>
           </div>
         </el-col>
       </el-row>
     </el-card>
 
-    <!-- 备份列表 -->
-    <el-card class="backup-list" shadow="never" style="margin-top: 24px">
-      <template #header>
-        <h3>📋 备份列表</h3>
-      </template>
-      
-      <el-table :data="backupList" v-loading="loadingBackups">
-        <el-table-column prop="name" label="备份名称" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="size" label="文件大小" width="120">
-          <template #default="{ row }">
-            {{ formatBytes(row.size) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="集合数量" width="120">
-          <template #default="{ row }">
-            <el-tooltip
-              v-if="Array.isArray(row.collections) && row.collections.length > 0"
-              placement="top"
-              :show-after="500"
-            >
-              <template #content>
-                <div style="max-width: 300px;">
-                  <div><strong>包含的集合 ({{ row.collections.length }}个):</strong></div>
-                  <div style="margin-top: 8px;">
-                    <el-tag
-                      v-for="collection in row.collections"
-                      :key="collection"
-                      size="small"
-                      style="margin: 2px;"
-                    >
-                      {{ collection }}
-                    </el-tag>
-                  </div>
-                </div>
-              </template>
-              <el-tag size="small" type="info">
-                {{ row.collections.length }} 个集合
-              </el-tag>
-            </el-tooltip>
-            <span v-else>0 个集合</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200">
-          <template #default="{ row }">
-            <el-button size="small" @click="restoreBackup(row)">
-              恢复
-            </el-button>
-            <el-button size="small" @click="downloadBackup(row)">
-              下载
-            </el-button>
-            <el-button size="small" type="danger" @click="deleteBackup(row)">
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+
 
 
 
@@ -283,13 +283,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DataBoard,
   Download,
-  FolderAdd,
-  Refresh
+  Upload
 } from '@element-plus/icons-vue'
 
 import {
@@ -298,32 +297,28 @@ import {
   formatDateTime,
   formatUptime,
   type DatabaseStatus,
-  type DatabaseStats,
-  type BackupInfo,
-  type ConnectionTestResult
+  type DatabaseStats
 } from '@/api/database'
 
 // 响应式数据
 const loading = ref(false)
 
 const exporting = ref(false)
-const backingUp = ref(false)
-const loadingBackups = ref(false)
+const importing = ref(false)
 const testing = ref(false)
 const cleaning = ref(false)
 
 const exportFormat = ref('json')
-const exportCollection = ref('all')
-const backupName = ref('')
+const exportCollection = ref('config_and_reports')  // 默认选择"配置和报告"
+const importFile = ref<File | null>(null)
+const importOverwrite = ref(false)
+const uploadRef = ref()
 const cleanupDays = ref(30)
 const logCleanupDays = ref(90)
-
-
 
 // 数据状态
 const databaseStatus = ref<DatabaseStatus | null>(null)
 const databaseStats = ref<DatabaseStats | null>(null)
-const backupList = ref<BackupInfo[]>([])
 
 // 计算属性
 const mongoStatus = computed(() => databaseStatus.value?.mongodb || {
@@ -371,22 +366,6 @@ const loadDatabaseStats = async () => {
     ElMessage.error('加载数据库统计失败')
   }
 }
-
-const loadBackups = async () => {
-  try {
-    loadingBackups.value = true
-    const response = await databaseApi.getBackups()
-    backupList.value = response.data
-    console.log('📋 备份列表加载成功:', response.data)
-  } catch (error) {
-    console.error('❌ 加载备份列表失败:', error)
-    ElMessage.error('加载备份列表失败')
-  } finally {
-    loadingBackups.value = false
-  }
-}
-
-
 
 const testConnections = async () => {
   try {
@@ -440,16 +419,34 @@ const exportData = async () => {
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
     ]
 
+    // 分析报告集合列表
+    const reportCollections = [
+      'analysis_results',    // 分析结果
+      'analysis_tasks',      // 分析任务
+      'debate_records'       // 辩论记录
+    ]
+
+    // 配置和报告集合列表
+    const configAndReportsCollections = [
+      ...configCollections,
+      ...reportCollections
+    ]
+
     let collections: string[] = []
     let sanitize = false  // 是否启用脱敏
+    let exportType = ''   // 导出类型（用于文件名）
 
-    if (exportCollection.value === 'all') {
-      collections = [] // 空数组表示导出所有集合
-    } else if (exportCollection.value === 'config_only') {
+    if (exportCollection.value === 'config_only') {
       collections = configCollections // 仅导出配置数据
-      sanitize = true  // 配置数据导出时自动启用脱敏（清空 API key 等敏感字段）
+      sanitize = true  // 配置数据导出时自动启用脱敏（清空 API key 等敏感字段）- 用于演示系统
+      exportType = '_config'
+    } else if (exportCollection.value === 'config_and_reports') {
+      collections = configAndReportsCollections // 导出配置和报告
+      sanitize = false  // 不脱敏 - 用于迁移，需要保留完整数据
+      exportType = '_config_reports'
     } else {
       collections = [exportCollection.value] // 导出单个集合
+      exportType = `_${exportCollection.value}`
     }
 
     const blob = await databaseApi.exportData({
@@ -462,13 +459,15 @@ const exportData = async () => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    const suffix = exportCollection.value === 'config_only' ? '_config' : ''
-    link.download = `database_export${suffix}_${new Date().toISOString().split('T')[0]}.${exportFormat.value}`
+    link.download = `database_export${exportType}_${new Date().toISOString().split('T')[0]}.${exportFormat.value}`
     link.click()
     URL.revokeObjectURL(url)
 
+    // 根据导出类型显示不同的成功消息
     if (exportCollection.value === 'config_only') {
       ElMessage.success('配置数据导出成功（已脱敏：API key 等敏感字段已清空，用户数据仅保留结构）')
+    } else if (exportCollection.value === 'config_and_reports') {
+      ElMessage.success('配置和报告数据导出成功（包含完整数据，可用于迁移）')
     } else {
       ElMessage.success('数据导出成功')
     }
@@ -481,73 +480,76 @@ const exportData = async () => {
   }
 }
 
-// 备份管理方法
-const createBackup = async () => {
-  if (!backupName.value.trim()) {
-    ElMessage.warning('请输入备份名称')
+// 文件上传处理
+const handleFileChange = (file: any) => {
+  importFile.value = file.raw
+  console.log('📁 选择文件:', file.name)
+}
+
+const handleFileRemove = () => {
+  importFile.value = null
+  console.log('🗑️ 移除文件')
+}
+
+// 数据导入
+const importData = async () => {
+  if (!importFile.value) {
+    ElMessage.warning('请先选择要导入的文件')
     return
   }
 
-  backingUp.value = true
   try {
-    const response = await databaseApi.createBackup({
-      name: backupName.value.trim(),
-      collections: [] // 空数组表示备份所有集合
+    // 确认导入
+    const confirmMessage = importOverwrite.value
+      ? '确定要导入数据吗？这将覆盖现有数据！'
+      : '确定要导入数据吗？'
+
+    await ElMessageBox.confirm(
+      confirmMessage,
+      '确认导入',
+      {
+        type: 'warning',
+        confirmButtonText: '确定导入',
+        cancelButtonText: '取消'
+      }
+    )
+
+    importing.value = true
+
+    const result = await databaseApi.importData(importFile.value, {
+      collection: 'imported_data',  // 后端会自动检测多集合模式
+      format: 'json',
+      overwrite: importOverwrite.value
     })
 
-    ElMessage.success('备份创建成功')
-    backupName.value = ''
+    console.log('✅ 导入结果:', result)
 
-    // 重新加载备份列表
-    await loadBackups()
+    // 根据导入模式显示不同的成功消息
+    if (result.data.mode === 'multi_collection') {
+      ElMessage.success(
+        `数据导入成功！共导入 ${result.data.total_collections} 个集合，` +
+        `${result.data.total_inserted} 条文档`
+      )
+    } else {
+      ElMessage.success(
+        `数据导入成功！导入 ${result.data.inserted_count} 条文档到集合 ${result.data.collection}`
+      )
+    }
 
-  } catch (error) {
-    console.error('❌ 备份创建失败:', error)
-    ElMessage.error('备份创建失败')
+    // 清空文件选择
+    importFile.value = null
+    uploadRef.value?.clearFiles()
+
+    // 刷新数据库统计
+    await loadDatabaseStats()
+
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('❌ 数据导入失败:', error)
+      ElMessage.error(error.response?.data?.detail || '数据导入失败')
+    }
   } finally {
-    backingUp.value = false
-  }
-}
-
-const restoreBackup = async (backup: BackupInfo) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要恢复备份 "${backup.name}" 吗？这将覆盖当前数据！`,
-      '确认恢复',
-      { type: 'warning' }
-    )
-
-    ElMessage.info('备份恢复功能开发中...')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('备份恢复失败')
-    }
-  }
-}
-
-const downloadBackup = (backup: BackupInfo) => {
-  ElMessage.info('备份下载功能开发中...')
-}
-
-const deleteBackup = async (backup: BackupInfo) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除备份 "${backup.name}" 吗？`,
-      '确认删除',
-      { type: 'warning' }
-    )
-
-    await databaseApi.deleteBackup(backup.id)
-    ElMessage.success('备份删除成功')
-
-    // 重新加载备份列表
-    await loadBackups()
-
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('❌ 删除备份失败:', error)
-      ElMessage.error('删除备份失败')
-    }
+    importing.value = false
   }
 }
 
@@ -615,11 +617,8 @@ onMounted(async () => {
   // 并行加载数据
   await Promise.all([
     loadDatabaseStatus(),
-    loadDatabaseStats(),
-    loadBackups()
+    loadDatabaseStats()
   ])
-
-
 
   console.log('✅ 数据库管理页面初始化完成')
 })
