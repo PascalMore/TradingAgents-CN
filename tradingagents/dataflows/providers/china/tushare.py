@@ -1403,7 +1403,7 @@ class TushareProvider(BaseStockDataProvider):
                 "roe_waa": self._safe_float(latest_indicator.get('roe_waa')),  # 加权平均净资产收益率
                 "roe_dt": self._safe_float(latest_indicator.get('roe_dt')),  # 净资产收益率(扣除非经常损益)
                 "roa2": self._safe_float(latest_indicator.get('roa2')),  # 总资产收益率(扣除非经常损益)
-                "gross_margin": self._safe_float(latest_indicator.get('gross_margin')),  # 销售毛利率
+                "gross_margin": self._safe_float(latest_indicator.get('grossprofit_margin')),  # 🔥 修复：使用 grossprofit_margin（销售毛利率%）而不是 gross_margin（毛利绝对值）
                 "netprofit_margin": self._safe_float(latest_indicator.get('netprofit_margin')),  # 销售净利率
                 "cogs_of_sales": self._safe_float(latest_indicator.get('cogs_of_sales')),  # 销售成本率
                 "expense_of_sales": self._safe_float(latest_indicator.get('expense_of_sales')),  # 销售期间费用率
