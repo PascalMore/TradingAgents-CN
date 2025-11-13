@@ -289,6 +289,36 @@ class StockDataPreparer:
                 suggestion="请检查网络连接或稍后重试"
             )
 
+    async def _prepare_data_by_market_async(self, stock_code: str, market_type: str,
+                                           period_days: int, analysis_date: str) -> StockDataPreparationResult:
+        """根据市场类型预获取数据（异步版本）"""
+        logger.debug(f"📊 [数据准备-异步] 开始为{market_type}股票{stock_code}准备数据")
+
+        try:
+            if market_type == "A股":
+                return await self._prepare_china_stock_data_async(stock_code, period_days, analysis_date)
+            elif market_type == "港股":
+                return self._prepare_hk_stock_data(stock_code, period_days, analysis_date)
+            elif market_type == "美股":
+                return self._prepare_us_stock_data(stock_code, period_days, analysis_date)
+            else:
+                return StockDataPreparationResult(
+                    is_valid=False,
+                    stock_code=stock_code,
+                    market_type=market_type,
+                    error_message=f"不支持的市场类型: {market_type}",
+                    suggestion="请选择支持的市场类型：A股、港股、美股"
+                )
+        except Exception as e:
+            logger.error(f"❌ [数据准备-异步] 数据准备异常: {e}")
+            return StockDataPreparationResult(
+                is_valid=False,
+                stock_code=stock_code,
+                market_type=market_type,
+                error_message=f"数据准备过程中发生错误: {str(e)}",
+                suggestion="请检查网络连接或稍后重试"
+            )
+
     def _prepare_china_stock_data(self, stock_code: str, period_days: int,
                                  analysis_date: str) -> StockDataPreparationResult:
         """预获取A股数据，包含数据库检查和自动同步"""
@@ -438,6 +468,130 @@ class StockDataPreparer:
 
         except Exception as e:
             logger.error(f"❌ [A股数据] 数据准备失败: {e}")
+            import traceback
+            logger.debug(f"详细错误: {traceback.format_exc()}")
+            return StockDataPreparationResult(
+                is_valid=False,
+                stock_code=stock_code,
+                market_type="A股",
+                stock_name=stock_name,
+                has_basic_info=has_basic_info,
+                has_historical_data=has_historical_data,
+                error_message=f"数据准备失败: {str(e)}",
+                suggestion="请检查网络连接或数据源配置"
+            )
+
+    async def _prepare_china_stock_data_async(self, stock_code: str, period_days: int,
+                                             analysis_date: str) -> StockDataPreparationResult:
+        """预获取A股数据（异步版本），包含数据库检查和自动同步"""
+        logger.info(f"📊 [A股数据-异步] 开始准备{stock_code}的数据 (时长: {period_days}天)")
+
+        # 计算日期范围
+        end_date = datetime.strptime(analysis_date, '%Y-%m-%d')
+        from app.core.config import settings
+        lookback_days = getattr(settings, 'MARKET_ANALYST_LOOKBACK_DAYS', 365)
+        extended_start_date = end_date - timedelta(days=lookback_days)
+        extended_start_date_str = extended_start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+
+        logger.info(f"📅 [A股数据-异步] 实际数据范围: {extended_start_date_str} 到 {end_date_str} ({lookback_days}天)")
+
+        has_historical_data = False
+        has_basic_info = False
+        stock_name = "未知"
+        cache_status = ""
+
+        try:
+            # 1. 检查数据库中的数据是否存在和最新
+            logger.debug(f"📊 [A股数据-异步] 检查数据库中{stock_code}的数据...")
+            db_check_result = self._check_database_data(stock_code, extended_start_date_str, end_date_str)
+
+            # 2. 如果数据不存在或不是最新，自动触发同步（使用异步方法）
+            if not db_check_result["has_data"] or not db_check_result["is_latest"]:
+                logger.warning(f"⚠️ [A股数据-异步] 数据库数据不完整: {db_check_result['message']}")
+                logger.info(f"🔄 [A股数据-异步] 自动触发数据同步: {stock_code}")
+
+                # 🔥 使用异步方法同步数据
+                sync_result = await self._trigger_data_sync_async(stock_code, extended_start_date_str, end_date_str)
+                if sync_result["success"]:
+                    logger.info(f"✅ [A股数据-异步] 数据同步成功: {sync_result['message']}")
+                    cache_status += "数据已同步; "
+                else:
+                    logger.warning(f"⚠️ [A股数据-异步] 数据同步失败: {sync_result['message']}")
+            else:
+                logger.info(f"✅ [A股数据-异步] 数据库数据检查通过: {db_check_result['message']}")
+                cache_status += "数据库数据最新; "
+
+            # 3. 获取基本信息（同步操作）
+            logger.debug(f"📊 [A股数据-异步] 获取{stock_code}基本信息...")
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
+            stock_info = get_china_stock_info_unified(stock_code)
+
+            if stock_info and "❌" not in stock_info and "未能获取" not in stock_info:
+                if "股票名称:" in stock_info:
+                    lines = stock_info.split('\n')
+                    for line in lines:
+                        if "股票名称:" in line:
+                            stock_name = line.split(':')[1].strip()
+                            break
+
+                if stock_name != "未知" and not stock_name.startswith(f"股票{stock_code}"):
+                    has_basic_info = True
+                    logger.info(f"✅ [A股数据-异步] 基本信息获取成功: {stock_code} - {stock_name}")
+                    cache_status += "基本信息已缓存; "
+
+            # 4. 获取历史数据（同步操作）
+            logger.debug(f"📊 [A股数据-异步] 获取{stock_code}历史数据...")
+            from tradingagents.dataflows.interface import get_china_stock_data_unified
+            historical_data = get_china_stock_data_unified(stock_code, extended_start_date_str, end_date_str)
+
+            if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
+                data_indicators = ["开盘价", "收盘价", "最高价", "最低价", "成交量"]
+                has_valid_data = (
+                    len(historical_data) > 50 and
+                    any(indicator in historical_data for indicator in data_indicators)
+                )
+
+                if has_valid_data:
+                    has_historical_data = True
+                    logger.info(f"✅ [A股数据-异步] 历史数据获取成功: {stock_code}")
+                    cache_status += f"历史数据已缓存({lookback_days}天); "
+                else:
+                    return StockDataPreparationResult(
+                        is_valid=False,
+                        stock_code=stock_code,
+                        market_type="A股",
+                        stock_name=stock_name,
+                        has_basic_info=has_basic_info,
+                        error_message=f"股票 {stock_code} 的历史数据无效或不足",
+                        suggestion="该股票可能为新上市股票或数据源暂时不可用，请稍后重试"
+                    )
+            else:
+                return StockDataPreparationResult(
+                    is_valid=False,
+                    stock_code=stock_code,
+                    market_type="A股",
+                    stock_name=stock_name,
+                    has_basic_info=has_basic_info,
+                    error_message=f"无法获取股票 {stock_code} 的历史数据",
+                    suggestion="请检查网络连接或数据源配置，或稍后重试"
+                )
+
+            # 5. 数据准备成功
+            logger.info(f"🎉 [A股数据-异步] 数据准备完成: {stock_code} - {stock_name}")
+            return StockDataPreparationResult(
+                is_valid=True,
+                stock_code=stock_code,
+                market_type="A股",
+                stock_name=stock_name,
+                has_historical_data=has_historical_data,
+                has_basic_info=has_basic_info,
+                data_period_days=lookback_days,
+                cache_status=cache_status.rstrip('; ')
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [A股数据-异步] 数据准备失败: {e}")
             import traceback
             logger.debug(f"详细错误: {traceback.format_exc()}")
             return StockDataPreparationResult(
@@ -1133,6 +1287,48 @@ def get_stock_preparation_message(stock_code: str, market_type: str = "auto",
         return f"✅ 数据准备成功: {result.stock_code} ({result.market_type}) - {result.stock_name}\n📊 {result.cache_status}"
     else:
         return f"❌ 数据准备失败: {result.error_message}\n💡 建议: {result.suggestion}"
+
+
+async def prepare_stock_data_async(stock_code: str, market_type: str = "auto",
+                                   period_days: int = None, analysis_date: str = None) -> StockDataPreparationResult:
+    """
+    异步版本：预获取和验证股票数据
+
+    🔥 专门用于 FastAPI 异步上下文，避免事件循环冲突
+
+    Args:
+        stock_code: 股票代码
+        market_type: 市场类型 ("A股", "港股", "美股", "auto")
+        period_days: 历史数据时长（天），默认30天
+        analysis_date: 分析日期，默认为今天
+
+    Returns:
+        StockDataPreparationResult: 数据准备结果
+    """
+    preparer = get_stock_preparer()
+
+    # 使用异步版本的内部方法
+    if period_days is None:
+        period_days = preparer.default_period_days
+
+    if analysis_date is None:
+        from datetime import datetime
+        analysis_date = datetime.now().strftime('%Y-%m-%d')
+
+    logger.info(f"📊 [数据准备-异步] 开始准备股票数据: {stock_code} (市场: {market_type}, 时长: {period_days}天)")
+
+    # 1. 基本格式验证（同步操作）
+    format_result = preparer._validate_format(stock_code, market_type)
+    if not format_result.is_valid:
+        return format_result
+
+    # 2. 自动检测市场类型
+    if market_type == "auto":
+        market_type = preparer._detect_market_type(stock_code)
+        logger.debug(f"📊 [数据准备-异步] 自动检测市场类型: {market_type}")
+
+    # 3. 预获取数据并验证（使用异步版本）
+    return await preparer._prepare_data_by_market_async(stock_code, market_type, period_days, analysis_date)
 
 
 # 保持向后兼容的别名
