@@ -261,7 +261,28 @@ class TushareProvider(BaseStockDataProvider):
         return TUSHARE_AVAILABLE and self.connected and self.api is not None
     
     # ==================== 基础数据接口 ====================
-    
+    def get_index_list_sync(self, market: str = None) -> Optional[pd.DataFrame]:
+        """获取指数列表（同步版本）"""
+        if not self.is_available():
+            return None
+        
+        try:
+            df = self.api.index_basic(
+                market=market,
+                fields='ts_code,name,fullname,market,publisher,category,base_date,base_point,list_date,desc,exp_date'
+            )
+            #过滤到期指数
+            df = df[df['exp_date'].isnull()]
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 成功获取 {len(df)} 条指数数据")
+                return df
+            else:
+                self.logger.warning("⚠️ Tushare API 返回空数据")
+                return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数列表失败: {e}")
+            return None
+        
     def get_stock_list_sync(self, market: str = None) -> Optional[pd.DataFrame]:
         """获取股票列表（同步版本）"""
         if not self.is_available():
@@ -282,6 +303,39 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取股票列表失败: {e}")
             return None
 
+    async def get_index_list(self, market: str = None) -> Optional[List[Dict[str, Any]]]:
+        """获取指数列表（异步版本）"""
+        if not self.is_available():
+            return None
+
+        try:
+            # 构建查询参数
+            params = {
+                'market': market, 
+                'fields': 'ts_code,name,fullname,market,publisher,category,base_date,base_point,list_date,desc,exp_date'
+            }
+            
+            # 获取数据
+            df = await asyncio.to_thread(self.api.index_basic, **params)
+            
+            if df is None or df.empty:
+                return None
+            
+            # 转换为标准格式
+            index_list = []
+            for _, row in df.iterrows():
+                #过滤到期的指数
+                if not row['exp_date']:
+                    index_info = self.standardize_index_basic_info(row.to_dict())
+                    index_list.append(index_info)
+            
+            self.logger.info(f"✅ 获取指数列表: {len(index_list)}只")
+            return index_list
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数列表失败: {e}")
+            return None
+        
     async def get_stock_list(self, market: str = None) -> Optional[List[Dict[str, Any]]]:
         """获取股票列表（异步版本）"""
         if not self.is_available():
@@ -1201,6 +1255,38 @@ class TushareProvider(BaseStockDataProvider):
             "data_version": 1,
             "updated_at": datetime.utcnow()
         }
+    
+    def standardize_index_basic_info(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """标准化指数基础信息"""
+        ts_code = raw_data.get('ts_code', '')
+        symbol = raw_data.get('symbol', ts_code.split('.')[0] if '.' in ts_code else ts_code)
+        return {
+            # 基础字段
+            "code": symbol,
+            "name": raw_data.get('name', ''),
+            "symbol": symbol,
+            "full_symbol": ts_code,
+
+            # 指数全称
+            "fullname": raw_data.get('fullname', ''),
+            # 市场
+            "market": self._convert_index_market_info(raw_data.get('market')), 
+
+            # 业务信息
+            "publisher": self._safe_str(raw_data.get('publisher')),
+            "category": self._safe_str(raw_data.get('category')), 
+            "base_date": self._format_date_output(raw_data.get('base_date')),
+            "base_point": self._convert_to_float(raw_data.get('base_point')),
+            "list_date": self._format_date_output(raw_data.get('list_date')),
+            #"exp_date": self._format_date_output(raw_data.get('exp_date')),
+            # 指数介绍
+            "desc": self._safe_str(raw_data.get('desc')),
+
+            # 元数据
+            "data_source": "tushare",
+            "data_version": 1,
+            "updated_at": datetime.utcnow()
+        }
 
     def standardize_quotes(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """标准化实时行情数据"""
@@ -1250,6 +1336,23 @@ class TushareProvider(BaseStockDataProvider):
         }
 
     # ==================== 辅助方法 ====================
+
+    def _convert_index_market_info(self, market: str) -> str:
+        """将指数的市场信息转换为中文"""
+        if market == "SW":
+            return "申万指数"
+        elif market == "MSCI":
+            return "MSCI指数"
+        elif market == "CSI":
+            return "中证指数"
+        elif market == "SSE":
+            return "上证指数"
+        elif market == "SZSE":
+            return "深证指数"
+        elif market == "CICC":
+            return "中金指数"
+        else:
+            return "其他指数"
 
     def _normalize_ts_code(self, symbol: str) -> str:
         """标准化为Tushare的ts_code格式"""

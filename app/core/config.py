@@ -191,6 +191,7 @@ class Settings(BaseSettings):
     # Tushare统一数据同步配置
     TUSHARE_UNIFIED_ENABLED: bool = Field(default=True)
     TUSHARE_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True)
+    TUSHARE_INDEX_INFO_SYNC_CRON: str = Field(default="30 2 * * *")  # 每日凌晨2点30
     TUSHARE_BASIC_INFO_SYNC_CRON: str = Field(default="0 2 * * *")  # 每日凌晨2点
     TUSHARE_QUOTES_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_QUOTES_SYNC_CRON: str = Field(default="*/5 9-15 * * 1-5")  # 交易时间每5分钟

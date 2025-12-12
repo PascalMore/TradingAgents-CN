@@ -9,6 +9,7 @@ import logging
 
 from tradingagents.dataflows.providers.china.tushare import TushareProvider
 from app.services.stock_data_service import get_stock_data_service
+from app.services.index_data_service import get_index_data_service
 from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
 from app.core.database import get_mongo_db
@@ -41,6 +42,7 @@ class TushareSyncService:
     def __init__(self):
         self.provider = TushareProvider()
         self.stock_service = get_stock_data_service()
+        self.index_service = get_index_data_service()
         self.historical_service = None  # 延迟初始化
         self.news_service = None  # 延迟初始化
         self.db = get_mongo_db()
@@ -156,7 +158,96 @@ class TushareSyncService:
             logger.error(f"❌ 股票基础信息同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
             return stats
-    
+            
+    async def sync_index_basic_info(self, force_update: bool = False, job_id: str = None) -> Dict[str, Any]:
+        """
+        同步指数基础信息
+
+        Args:
+            force_update: 是否强制更新所有数据
+            job_id: 任务ID（用于进度跟踪）
+
+        Returns:
+            同步结果统计
+        """
+        logger.info("🔄 开始同步指数基础信息...")
+
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "start_time": datetime.utcnow(),
+            "errors": []
+        }
+        
+        try:
+            # 1. 从Tushare获取指数列表(CSI、SW、SSE、SZSE、MSCI)
+            index_list = []
+            for m in ["SW", "SSE", "SZSE", "MSCI"]:
+            #for m in ["SW"]:
+                t_list = await self.provider.get_index_list(market=m)
+                index_list = index_list + t_list
+            if not index_list:
+                logger.error("❌ 无法获取指数列表")
+                return stats
+            
+            stats["total_processed"] = len(index_list)
+            logger.info(f"📊 获取到 {len(index_list)} 只指数信息")
+
+            # 2. 批量处理
+            for i in range(0, len(index_list), self.batch_size):
+                # 检查是否需要退出
+                if job_id and await self._should_stop(job_id):
+                    logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                    stats["stopped"] = True
+                    break
+
+                batch = index_list[i:i + self.batch_size]
+                batch_stats = await self._process_index_basic_batch(batch, force_update)
+
+                # 更新统计
+                stats["success_count"] += batch_stats["success_count"]
+                stats["error_count"] += batch_stats["error_count"]
+                stats["skipped_count"] += batch_stats["skipped_count"]
+                stats["errors"].extend(batch_stats["errors"])
+
+                # 进度日志和进度更新
+                progress = min(i + self.batch_size, len(index_list))
+                progress_percent = int((progress / len(index_list)) * 100)
+                logger.info(f"📈 基础信息同步进度: {progress}/{len(index_list)} ({progress_percent}%) "
+                           f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+
+                # 更新任务进度
+                if job_id:
+                    await self._update_progress(
+                        job_id,
+                        progress_percent,
+                        f"已处理 {progress}/{len(index_list)} 只指数"
+                    )
+
+                # API限流
+                if i + self.batch_size < len(index_list):
+                    await asyncio.sleep(self.rate_limit_delay)
+            
+            # 3. 完成统计
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+            
+            logger.info(f"✅ 指数基础信息同步完成: "
+                       f"总计 {stats['total_processed']} 只, "
+                       f"成功 {stats['success_count']} 只, "
+                       f"错误 {stats['error_count']} 只, "
+                       f"跳过 {stats['skipped_count']} 只, "
+                       f"耗时 {stats['duration']:.2f} 秒")
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"❌ 指数基础信息同步失败: {e}")
+            stats["errors"].append({"error": str(e), "context": "sync_index_basic_info"})
+            return stats
+        
     async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
         """处理基础信息批次"""
         batch_stats = {
@@ -212,6 +303,72 @@ class TushareSyncService:
                         code = stock_info.dict().get("code", "unknown")
                     else:
                         code = stock_info.get("code", "unknown")
+                except:
+                    code = "unknown"
+
+                batch_stats["errors"].append({
+                    "code": code,
+                    "error": str(e),
+                    "context": "_process_basic_info_batch"
+                })
+        
+        return batch_stats
+    
+    async def _process_index_basic_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
+        """处理指数基础信息批次"""
+        batch_stats = {
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "errors": []
+        }
+        
+        for index_info in batch:
+            try:
+                # 🔥 先转换为字典格式（如果是Pydantic模型）
+                if hasattr(index_info, 'model_dump'):
+                    index_data = index_info.model_dump()
+                elif hasattr(index_info, 'dict'):
+                    index_data = index_info.dict()
+                else:
+                    index_data = index_info
+
+                code = index_data["code"]
+
+                # 检查是否需要更新
+                if not force_update:
+                    existing = await self.index_service.get_index_basic_info(code)
+                    if existing:
+                        # 🔥 existing 也可能是 Pydantic 模型，需要安全获取属性
+                        existing_dict = existing.model_dump() if hasattr(existing, 'model_dump') else (existing.dict() if hasattr(existing, 'dict') else existing)
+                        if self._is_data_fresh(existing_dict.get("updated_at"), hours=24):
+                            batch_stats["skipped_count"] += 1
+                            continue
+
+                # 更新到数据库（指定数据源为 tushare）
+                success = await self.index_service.update_index_basic_info(code, index_data, source="tushare")
+                if success:
+                    batch_stats["success_count"] += 1
+                else:
+                    batch_stats["error_count"] += 1
+                    batch_stats["errors"].append({
+                        "code": code,
+                        "error": "数据库更新失败",
+                        "context": "update_index_basic_info"
+                    })
+
+            except Exception as e:
+                batch_stats["error_count"] += 1
+                # 🔥 安全获取 code（处理 Pydantic 模型和字典）
+                try:
+                    if hasattr(index_info, 'code'):
+                        code = index_info.code
+                    elif hasattr(index_info, 'model_dump'):
+                        code = index_info.model_dump().get("code", "unknown")
+                    elif hasattr(index_info, 'dict'):
+                        code = index_info.dict().get("code", "unknown")
+                    else:
+                        code = index_info.get("code", "unknown")
                 except:
                     code = "unknown"
 
@@ -1285,6 +1442,16 @@ async def run_tushare_basic_info_sync(force_update: bool = False):
         logger.error(f"❌ Tushare基础信息同步失败: {e}")
         raise
 
+async def run_tushare_index_info_sync(force_update: bool = False):
+    """APScheduler任务：同步指数基础信息"""
+    try:
+        service = await get_tushare_sync_service()
+        result = await service.sync_index_basic_info(force_update, job_id="tushare_index_basic_info_sync")
+        logger.info(f"✅ Tushare指数基础信息同步完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Tushare指数基础信息同步失败: {e}")
+        raise
 
 async def run_tushare_quotes_sync(force: bool = False):
     """

@@ -42,6 +42,7 @@ from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncS
 from app.services.scheduler_service import set_scheduler_instance
 from app.worker.tushare_sync_service import (
     run_tushare_basic_info_sync,
+    run_tushare_index_info_sync,
     run_tushare_quotes_sync,
     run_tushare_historical_sync,
     run_tushare_financial_sync,
@@ -347,6 +348,20 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ Tushare基础信息同步已添加但暂停: {settings.TUSHARE_BASIC_INFO_SYNC_CRON}")
         else:
             logger.info(f"📅 Tushare基础信息同步已配置: {settings.TUSHARE_BASIC_INFO_SYNC_CRON}")
+        
+        # 指数基础信息同步任务
+        scheduler.add_job(
+            run_tushare_index_info_sync,
+            CronTrigger.from_crontab(settings.TUSHARE_INDEX_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="tushare_index_basic_info_sync",
+            name="指数基础信息同步（Tushare）",
+            kwargs={"force_update": False}
+        )
+        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_BASIC_INFO_SYNC_ENABLED):
+            scheduler.pause_job("tushare_index_basic_info_sync")
+            logger.info(f"⏸️ Tushare指数信息同步已添加但暂停: {settings.TUSHARE_INDEX_INFO_SYNC_CRON}")
+        else:
+            logger.info(f"📅 Tushare指数信息同步已配置: {settings.TUSHARE_INDEX_INFO_SYNC_CRON}")
 
         # 实时行情同步任务
         scheduler.add_job(
