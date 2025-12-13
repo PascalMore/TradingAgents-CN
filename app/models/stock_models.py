@@ -20,7 +20,7 @@ def to_str_id(v: Any) -> str:
 
 # 枚举类型定义
 MarketType = Literal["CN", "HK", "US"]  # 市场类型
-ExchangeType = Literal["SZSE", "SSE", "SEHK", "NYSE", "NASDAQ"]  # 交易所
+ExchangeType = Literal["SZSE", "SSE", "BSE", "SEHK", "NYSE", "NASDAQ"]  # 交易所
 StockStatus = Literal["L", "D", "P"]  # 上市状态: L-上市 D-退市 P-暂停
 CurrencyType = Literal["CNY", "HKD", "USD"]  # 货币类型
 
@@ -101,7 +101,7 @@ class StockBasicInfoExtended(BaseModel):
     sector: Optional[str] = Field(None, description="所属板块标准化（GICS行业）")
     delist_date: Optional[str] = Field(None, description="退市日期")
     status: Optional[StockStatus] = Field(None, description="上市状态")
-    is_hs: Optional[bool] = Field(None, description="是否沪深港通标的")
+    is_hs: Optional[str] = Field(None, description="是否沪深港通标的")
 
     # 新增股本信息
     total_shares: Optional[float] = Field(None, description="总股本")

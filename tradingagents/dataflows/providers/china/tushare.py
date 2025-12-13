@@ -351,7 +351,7 @@ class TushareProvider(BaseStockDataProvider):
             if market:
                 # 根据市场筛选
                 if market == "CN":
-                    params['exchange'] = 'SSE,SZSE'  # 沪深交易所
+                    params['exchange'] = 'SSE,SZSE,BSE'  # 沪深交易所+北交所
                 elif market == "HK":
                     return None  # Tushare港股需要单独处理
                 elif market == "US":
@@ -1251,9 +1251,9 @@ class TushareProvider(BaseStockDataProvider):
             "act_ent_type": raw_data.get('act_ent_type'),
 
             # 元数据
-            "data_source": "tushare",
-            "data_version": 1,
-            "updated_at": datetime.utcnow()
+            #"data_source": "tushare",
+            #"data_version": 1,
+            #"updated_at": datetime.utcnow()
         }
     
     def standardize_index_basic_info(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1283,9 +1283,9 @@ class TushareProvider(BaseStockDataProvider):
             "desc": self._safe_str(raw_data.get('desc')),
 
             # 元数据
-            "data_source": "tushare",
-            "data_version": 1,
-            "updated_at": datetime.utcnow()
+            #"data_source": "tushare",
+            #"data_version": 1,
+            #"updated_at": datetime.utcnow()
         }
 
     def standardize_quotes(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
