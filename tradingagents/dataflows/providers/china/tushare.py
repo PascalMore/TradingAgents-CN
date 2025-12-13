@@ -1363,6 +1363,8 @@ class TushareProvider(BaseStockDataProvider):
         if symbol.isdigit() and len(symbol) == 6:
             if symbol.startswith(('60', '68', '90')):
                 return f"{symbol}.SH"  # 上交所
+            elif symbol.startswith('920'):
+                return f"{symbol}.BJ"  #北交所
             else:
                 return f"{symbol}.SZ"  # 深交所
 
