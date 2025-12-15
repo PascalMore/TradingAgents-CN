@@ -45,6 +45,7 @@ from app.worker.tushare_sync_service import (
     run_tushare_index_info_sync,
     run_tushare_quotes_sync,
     run_tushare_historical_sync,
+    run_tushare_index_historical_sync,
     run_tushare_financial_sync,
     run_tushare_status_check
 )
@@ -389,6 +390,19 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ Tushare历史数据同步已添加但暂停: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
         else:
             logger.info(f"📊 Tushare历史数据同步已配置: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
+        # 历史指数行情同步
+        scheduler.add_job(
+            run_tushare_index_historical_sync,
+            CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_INDEX_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="tushare_index_historical_sync",
+            name="历史指数数据同步（Tushare）",
+            kwargs={"incremental": True}
+        )
+        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_HISTORICAL_INDEX_SYNC_CRON):
+            scheduler.pause_job("tushare_historical_sync")
+            logger.info(f"⏸️ Tushare历史指数数据同步已添加但暂停: {settings.TUSHARE_HISTORICAL_INDEX_SYNC_CRON}")
+        else:
+            logger.info(f"📊 Tushare历史指数数据同步已配置: {settings.TUSHARE_HISTORICAL_INDEX_SYNC_CRON}")
 
         # 财务数据同步任务
         scheduler.add_job(

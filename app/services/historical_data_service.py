@@ -22,12 +22,14 @@ class HistoricalDataService:
         """初始化服务"""
         self.db = None
         self.collection = None
+        self.index_collection = None
         
     async def initialize(self):
         """初始化数据库连接"""
         try:
             self.db = get_database()
             self.collection = self.db.stock_daily_quotes
+            self.index_collection = self.db.index_daily_quotes
 
             # 🔥 确保索引存在（提升查询和 upsert 性能）
             await self._ensure_indexes()
@@ -73,7 +75,8 @@ class HistoricalDataService:
         data: pd.DataFrame,
         data_source: str,
         market: str = "CN",
-        period: str = "daily"
+        period: str = "daily",
+        data_col: str = "stock"
     ) -> int:
         """
         保存历史数据到数据库
@@ -88,14 +91,14 @@ class HistoricalDataService:
         Returns:
             保存的记录数量
         """
-        if self.collection is None:
+        if self.collection is None or self.index_collection is None:
             await self.initialize()
         
         try:
             if data is None or data.empty:
                 logger.warning(f"⚠️ {symbol} 历史数据为空，跳过保存")
                 return 0
-
+            
             from datetime import datetime
             total_start = datetime.now()
 
@@ -155,7 +158,7 @@ class HistoricalDataService:
                     # 批量执行（每200条）
                     if len(operations) >= batch_size:
                         batch_write_start = datetime.now()
-                        batch_saved = await self._execute_bulk_write_with_retry(symbol, operations)
+                        batch_saved = await self._execute_bulk_write_with_retry(data_col, symbol, operations)
                         batch_write_duration = (datetime.now() - batch_write_start).total_seconds()
                         logger.debug(f"   批量写入 {len(operations)} 条，耗时 {batch_write_duration:.2f}秒")
                         saved_count += batch_saved
@@ -174,7 +177,7 @@ class HistoricalDataService:
             # 执行剩余操作
             if operations:
                 saved_count += await self._execute_bulk_write_with_retry(
-                    symbol, operations
+                    data_col, symbol, operations
                 )
             final_write_duration = (datetime.now() - final_write_start).total_seconds()
 
@@ -192,6 +195,7 @@ class HistoricalDataService:
 
     async def _execute_bulk_write_with_retry(
         self,
+        data_col: str,
         symbol: str,
         operations: List,
         max_retries: int = 5  # 增加重试次数：从3次改为5次
@@ -200,7 +204,8 @@ class HistoricalDataService:
         执行批量写入，带重试机制
 
         Args:
-            symbol: 股票代码
+            data_col：数据表集合
+            symbol: 股票/指数代码
             operations: 批量操作列表
             max_retries: 最大重试次数
 
@@ -212,7 +217,10 @@ class HistoricalDataService:
 
         while retry_count < max_retries:
             try:
-                result = await self.collection.bulk_write(operations, ordered=False)
+                if data_col == "stock":
+                    result = await self.collection.bulk_write(operations, ordered=False)
+                else:
+                    result = await self.index_collection.bulk_write(operations, ordered=False)
                 saved_count = result.upserted_count + result.modified_count
                 logger.debug(f"✅ {symbol} 批量保存 {len(operations)} 条记录成功 (新增: {result.upserted_count}, 更新: {result.modified_count})")
                 return saved_count
@@ -275,8 +283,8 @@ class HistoricalDataService:
 
         # 基础字段映射
         doc = {
-            "symbol": symbol,
-            "code": symbol,  # 添加 code 字段，与 symbol 保持一致（向后兼容）
+            "symbol": symbol.split(".")[0],
+            "code": symbol.split(".")[0],  # 添加 code 字段，与 symbol 保持一致（向后兼容）
             "full_symbol": self._get_full_symbol(symbol, market),
             "market": market,
             "trade_date": trade_date,
@@ -329,6 +337,8 @@ class HistoricalDataService:
     
     def _get_full_symbol(self, symbol: str, market: str) -> str:
         """生成完整股票代码"""
+        if "." in symbol: #如果已经包含了后缀，直接返回
+            return symbol
         if market == "CN":
             if symbol.startswith('6'):
                 return f"{symbol}.SH"
@@ -447,7 +457,26 @@ class HistoricalDataService:
         except Exception as e:
             logger.error(f"❌ 获取最新日期失败 {symbol}: {e}")
             return None
-    
+  
+    async def get_latest_index_date(self, symbol: str, data_source: str) -> Optional[str]:
+        """获取最新数据日期"""
+        if self.index_collection is None:
+            await self.initialize()
+        
+        try:
+            result = await self.index_collection.find_one(
+                {"symbol": symbol, "data_source": data_source},
+                sort=[("trade_date", -1)]
+            )
+            
+            if result:
+                return result["trade_date"]
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ 获取最新日期失败 {symbol}: {e}")
+            return None
+        
     async def get_data_statistics(self) -> Dict[str, Any]:
         """获取数据统计信息"""
         if self.collection is None:

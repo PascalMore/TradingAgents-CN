@@ -28,6 +28,15 @@ async def test_tushare_index_info(provider):
     else:
         print("❌ 获取指数列表失败")
 
+async def test_tushare_historical_index_data(provider):
+    #data = await provider.get_historical_index_data(symbol="000001.SH,399006.SZ,801014.SI",start_date="20250101")
+    data = await provider.get_historical_index_data(symbol="801880.SI",start_date="20250101")
+    if len(data) > 0:
+        print(f"✅ 获取指数行情成功: {len(data)}条")
+        print(f"📊 示例指数: {pd.DataFrame(data).head(3).to_string(index=False)}")
+    else:
+        print("❌ 获取指数行情失败")
+
 async def main():
     """主测试函数"""
     from tradingagents.dataflows.providers.china.tushare import TushareProvider
@@ -38,8 +47,9 @@ async def main():
     if not success:
         raise RuntimeError("❌ Tushare连接失败，无法启动同步服务")
     
-    test_tushare_index_info_sync(provider)
-    await test_tushare_index_info(provider)
+    #test_tushare_index_info_sync(provider)
+    #await test_tushare_index_info(provider)
+    await test_tushare_historical_index_data(provider)
 
 if __name__ == "__main__":
     asyncio.run(main())

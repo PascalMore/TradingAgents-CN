@@ -197,6 +197,7 @@ class Settings(BaseSettings):
     TUSHARE_QUOTES_SYNC_CRON: str = Field(default="*/5 9-15 * * 1-5")  # 交易时间每5分钟
     TUSHARE_HISTORICAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 16 * * 1-5")  # 工作日16点
+    TUSHARE_HISTORICAL_INDEX_SYNC_CRON: str = Field(default="30 16 * * 1-5")  # 工作日16点30
     TUSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 3 * * 0")  # 周日凌晨3点
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)

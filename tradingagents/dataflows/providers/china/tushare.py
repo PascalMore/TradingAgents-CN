@@ -670,7 +670,118 @@ class TushareProvider(BaseStockDataProvider):
                 f"   堆栈跟踪:\n{error_details}"
             )
             return None
-    
+        
+    async def get_historical_index_data(
+        self,
+        symbol: str,
+        start_date: Union[str, date],
+        end_date: Union[str, date] = None,
+        period: str = "daily"
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取历史数据
+
+        Args:
+            symbol: 指数代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期 (daily/weekly/monthly)
+        """
+        if not self.is_available():
+            return None
+        
+        try:
+            ts_code = self._normalize_ts_code(symbol)
+
+            # 格式化日期
+            start_str = self._format_date(start_date)
+            end_str = self._format_date(end_date) if end_date else datetime.now().strftime('%Y%m%d')
+            # TODD: 对于申万指数行情的获取需要使用不同接口,pro_bar也无法获取申万指数
+            if ts_code.endswith(".SI"):
+                df = await asyncio.to_thread(
+                    ts.pro_bar,
+                    ts_code=ts_code,
+                    api=self.api,  # 传入 api 对象
+                    start_date=start_str,
+                    end_date=end_str,
+                    freq={ "daily": "D", "weekly": "W", "monthly": "M"}.get(period, "D")
+                    #adj='qfq'  # 不复权
+                )
+                print(df)
+            else:
+                if period == "weekly":
+                    df = await asyncio.to_thread(
+                        self.api.index_weekly,
+                        ts_code=ts_code,
+                        start_date=start_str,
+                        end_date=end_str
+                    )
+                elif period == "monthly":
+                    df = await asyncio.to_thread(
+                        self.api.index_monthly,
+                        ts_code=ts_code,
+                        start_date=start_str,
+                        end_date=end_str
+                    )
+                else:  # daily
+                    df = await asyncio.to_thread(
+                        self.api.index_daily,
+                        ts_code=ts_code,
+                        start_date=start_str,
+                        end_date=end_str
+                    )
+
+                # 🔧 使用 pro_bar 接口获取前复权数据（与同花顺一致）
+                # 注意：Tushare 的 daily/weekly/monthly 接口不支持复权
+                # 必须使用 ts.pro_bar() 函数并指定 adj='qfq' 参数
+
+                # 周期映射
+                #freq_map = {
+                #    "daily": "D",
+                #   "weekly": "W",
+                #    "monthly": "M"
+                #}
+                #freq = freq_map.get(period, "D")
+
+                # 使用 ts.pro_bar() 函数获取前复权数据
+                # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
+
+
+            if df is None or df.empty:
+                self.logger.warning(
+                    f"⚠️ Tushare API 返回空数据: symbol={symbol}, ts_code={ts_code}, "
+                    f"period={period}, start={start_str}, end={end_str}"
+                )
+                self.logger.warning(
+                    f"💡 可能原因: "
+                    f"1) 该指数在此期间无交易数据 "
+                    f"2) 日期范围不正确 "
+                    f"3) 指数代码格式错误 "
+                    f"4) Tushare API 限制或积分不足"
+                )
+                return None
+
+            # 数据标准化
+            df = self._standardize_historical_data(df)
+
+            #self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录 (前复权 qfq)")
+            self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录")
+            return df
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            self.logger.error(
+                f"❌ 获取历史数据失败 symbol={symbol}, period={period}\n"
+                f"   参数: ts_code={ts_code if 'ts_code' in locals() else 'N/A'}, "
+                f"start={start_str if 'start_st' in locals() else 'N/A'}, "
+                f"end={end_str if 'end_str' in locals() else 'N/A'}\n"
+                f"   错误类型: {type(e).__name__}\n"
+                f"   错误信息: {str(e)}\n"
+                f"   堆栈跟踪:\n{error_details}"
+            )
+            return None
+       
     # ==================== 扩展接口 ====================
     
     async def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:

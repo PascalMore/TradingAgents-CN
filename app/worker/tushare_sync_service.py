@@ -913,6 +913,213 @@ class TushareSyncService:
             })
             return stats
 
+    async def sync_historical_index_data(
+        self,
+        symbols: List[str] = None,
+        start_date: str = None,
+        end_date: str = None,
+        incremental: bool = True,
+        all_history: bool = False,
+        period: str = "daily",
+        job_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        同步历史数据
+
+        Args:
+            symbols: 指数代码列表
+            start_date: 开始日期
+            end_date: 结束日期
+            incremental: 是否增量同步
+            all_history: 是否同步所有历史数据
+            period: 数据周期 (daily/weekly/monthly)
+            job_id: 任务ID（用于进度跟踪）
+
+        Returns:
+            同步结果统计
+        """
+        period_name = {"daily": "日线", "weekly": "周线", "monthly": "月线"}.get(period, period)
+        logger.info(f"🔄 开始同步{period_name}历史数据...")
+
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "total_records": 0,
+            "start_time": datetime.utcnow(),
+            "errors": []
+        }
+
+        try:
+            # 1. 获取指数列表（排除MSCI指数）
+            if symbols is None:
+                # 查询所有指数清单，排除MSCI指数
+                cursor = await self.index_service.get_index_list(market="上证指数,深证指数") # 暂不支持申万指数行情
+
+                symbols = []
+                for o in cursor:
+                    symbols.append(o.full_symbol)
+                    
+                logger.info(f"📋 从 index_basic_info 获取到 {len(symbols)} 只指数（已排除MSCI指数）")
+
+            stats["total_processed"] = len(symbols)
+
+            # 2. 确定全局结束日期
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+
+            # 3. 确定全局起始日期（仅用于日志显示）
+            global_start_date = start_date
+            if not global_start_date:
+                if all_history:
+                    global_start_date = "1990-01-01"
+                elif incremental:
+                    global_start_date = "各指数最后日期"
+                else:
+                    global_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+            logger.info(f"📊 历史数据同步: 结束日期={end_date}, 指数数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
+
+            # 4. 批量处理
+            for i, symbol in enumerate(symbols):
+                # 记录单个指数开始时间
+                index_start_time = datetime.now()
+
+                try:
+                    # 检查是否需要退出
+                    if job_id and await self._should_stop(job_id):
+                        logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                        stats["stopped"] = True
+                        break
+
+                    # 速率限制
+                    await self.rate_limiter.acquire()
+
+                    # 确定该指数的起始日期
+                    symbol_start_date = start_date
+                    if not symbol_start_date:
+                        if all_history:
+                            symbol_start_date = "1990-01-01"
+                        elif incremental:
+                            # 增量同步：获取该指数的最后日期
+                            symbol_start_date = await self.historical_service.get_latest_index_date(symbol, "tushare")
+                            if symbol_start_date is None:
+                                symbol_start_date= "2000-01-01"
+                            logger.debug(f"📅 {symbol}: 从 {symbol_start_date} 开始同步")
+                        else:
+                            symbol_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+                    # 记录请求参数
+                    logger.debug(
+                        f"🔍 {symbol}: 请求{period_name}数据 "
+                        f"start={symbol_start_date}, end={end_date}, period={period}"
+                    )
+
+                    # ⏱️ 性能监控：API 调用
+                    api_start = datetime.now()
+                    df = await self.provider.get_historical_index_data(symbol, symbol_start_date, end_date, period=period)
+                    api_duration = (datetime.now() - api_start).total_seconds()
+
+                    if df is not None and not df.empty:
+                        # ⏱️ 性能监控：数据保存
+                        save_start = datetime.now()
+                        records_saved = await self.historical_service.save_historical_data(
+                            symbol=symbol,
+                            data=df,
+                            data_source="tushare",
+                            market="CN",
+                            period=period,
+                            data_col= "index")
+                        save_duration = (datetime.now() - save_start).total_seconds()
+
+                        stats["success_count"] += 1
+                        stats["total_records"] += records_saved
+
+                        # 计算单个指数耗时
+                        index_duration = (datetime.now() - index_start_time).total_seconds()
+                        logger.info(
+                            f"✅ {symbol}: 保存 {records_saved} 条{period_name}记录，"
+                            f"总耗时 {index_duration:.2f}秒 "
+                            f"(API: {api_duration:.2f}秒, 保存: {save_duration:.2f}秒)"
+                        )
+                    else:
+                        index_duration = (datetime.now() - index_start_time).total_seconds()
+                        logger.warning(
+                            f"⚠️ {symbol}: 无{period_name}数据 "
+                            f"(start={symbol_start_date}, end={end_date})，耗时 {index_duration:.2f}秒"
+                        )
+
+                    # 每个指数都更新进度
+                    progress_percent = int(((i + 1) / len(symbols)) * 100)
+
+                    # 更新任务进度
+                    if job_id:
+                        await self._update_progress(
+                            job_id,
+                            progress_percent,
+                            f"正在同步 {symbol} ({i + 1}/{len(symbols)})"
+                        )
+
+                    # 每50个指数输出一次详细日志
+                    if (i + 1) % 50 == 0 or (i + 1) == len(symbols):
+                        logger.info(f"📈 {period_name}数据同步进度: {i + 1}/{len(symbols)} ({progress_percent}%) "
+                                   f"(成功: {stats['success_count']}, 记录: {stats['total_records']})")
+
+                        # 输出速率限制器统计
+                        limiter_stats = self.rate_limiter.get_stats()
+                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次, "
+                                   f"等待次数: {limiter_stats['total_waits']}, "
+                                   f"总等待时间: {limiter_stats['total_wait_time']:.1f}秒")
+
+                except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
+                    stats["error_count"] += 1
+                    stats["errors"].append({
+                        "code": symbol,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "context": f"sync_historical_index_data_{period}",
+                        "traceback": error_details
+                    })
+                    logger.error(
+                        f"❌ {symbol} {period_name}数据同步失败\n"
+                        f"   参数: start={symbol_start_date if 'symbol_start_date' in locals() else 'N/A'}, "
+                        f"end={end_date}, period={period}\n"
+                        f"   错误类型: {type(e).__name__}\n"
+                        f"   错误信息: {str(e)}\n"
+                        f"   堆栈跟踪:\n{error_details}"
+                    )
+
+            # 4. 完成统计
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+
+            logger.info(f"✅ {period_name}数据同步完成: "
+                       f"指数 {stats['success_count']}/{stats['total_processed']}, "
+                       f"记录 {stats['total_records']} 条, "
+                       f"错误 {stats['error_count']} 个, "
+                       f"耗时 {stats['duration']:.2f} 秒")
+
+            return stats
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(
+                f"❌ 历史数据同步失败（外层异常）\n"
+                f"   错误类型: {type(e).__name__}\n"
+                f"   错误信息: {str(e)}\n"
+                f"   堆栈跟踪:\n{error_details}"
+            )
+            stats["errors"].append({
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "context": "sync_historical_index_data",
+                "traceback": error_details
+            })
+            return stats
+        
     async def _save_historical_data(self, symbol: str, df, period: str = "daily") -> int:
         """保存历史数据到数据库"""
         try:
@@ -1481,6 +1688,21 @@ async def run_tushare_historical_sync(incremental: bool = True):
         return result
     except Exception as e:
         logger.error(f"❌ [APScheduler] Tushare历史数据同步失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
+        raise
+
+async def run_tushare_index_historical_sync(incremental: bool = True):
+    """APScheduler任务：同步历史数据"""
+    logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史指数数据同步任务 (incremental={incremental})")
+    try:
+        service = await get_tushare_sync_service()
+        logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
+        result = await service.sync_historical_index_data(incremental=incremental, job_id="tushare_index_historical_sync")
+        logger.info(f"✅ [APScheduler] Tushare历史指数数据同步完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ [APScheduler] Tushare历史指数数据同步失败: {e}")
         import traceback
         logger.error(f"详细错误: {traceback.format_exc()}")
         raise
