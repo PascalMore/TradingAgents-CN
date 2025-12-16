@@ -53,9 +53,10 @@ def get_file_data(prefix: str):
         tol_df = pd.concat([tol_df, df])
     
     tol_df.rename(columns=
-    {"代码":"full_symbol", "日期":"trade_date", "前收盘价(元)":"pre_close", "涨跌(元)":"change",  "涨跌幅(%)":"pct_chg",
-    "开盘价(元)":"open","最高价(元)":"high","最低价(元)":"low","收盘价(元)":"close","成交量(股)":"volume","成交金额(元)":"amount"
+    {"代码":"full_symbol", "日期":"trade_date", "前收盘价":"pre_close", "涨跌":"change",  "涨跌幅(%)":"pct_chg",
+    "开盘价":"open","最高价":"high","最低价":"low","收盘价":"close","成交量(股)":"volume","成交金额(元)":"amount"
     }, inplace=True)
+    tol_df["full_symbol"] = tol_df["full_symbol"].map(lambda x: x[0].lower() + x[1:] if x.startswith(("H","N")) else x)
     #增加一些附加信息
     tol_df["version"]=1
     tol_df["market"]="CN"
@@ -74,6 +75,38 @@ def insert_data(target_doc, rd):
     except Exception as err:
         print(err)
         return 1
+    
+def sync_index_data():
+    client = connect_mongodb(use_docker=False)
+    col_des = client[DES_DB_NAME]
+    sat_tot_cnt = 0
+    sat_suc = 0
+    sat_fail=""
+    excels = ["12","13"]
+    for i in excels:
+        print("Insert Part:"+i)
+        part_df = get_file_data(i)
+        sat_tot_cnt = part_df["full_symbol"].unique().size
+        sat_suc=0
+        #print(part_df["full_symbol"].unique())
+        for c in part_df["full_symbol"].unique():
+            if c.endswith(".CSI"):
+                #print(f"{c} continue")
+                sat_fail += "," +c
+                sat_suc += 1
+                continue
+            #print(part_df[part_df["code"]==c]["trade_date"].min())
+            des_df=part_df[part_df["full_symbol"]==c]
+            des_df["created_at"]=time.strftime("%Y-%m-%d %H:%M:%S",time.localtime())
+            des_df["updated_at"]=time.strftime("%Y-%m-%d %H:%M:%S",time.localtime())
+            #print(des_df)
+            if insert_data(col_des.get_collection("index_daily_quotes"), des_df)>0:
+                sat_fail += "," +c
+            sat_suc += 1
+
+            print("进度：{}/{}, 失败：{}".format(sat_suc,sat_tot_cnt,sat_fail))
+
+    return 0
 
 def main():
     """主函数"""
@@ -115,4 +148,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    #main()
+    sync_index_data()
