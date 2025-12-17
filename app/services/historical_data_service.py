@@ -5,7 +5,7 @@
 """
 import asyncio
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -466,13 +466,21 @@ class HistoricalDataService:
             await self.initialize()
         
         try:
+            #注意：对于index，使用full_symbol进行匹配，即带后缀
             result = await self.index_collection.find_one(
-                {"symbol": symbol, "data_source": data_source},
+                {"full_symbol": symbol, "data_source": data_source},
                 sort=[("trade_date", -1)]
             )
             
             if result:
-                return result["trade_date"]
+                 # 返回最后日期的下一天（避免重复同步）
+                try:
+                    last_date_obj = datetime.strptime(result["trade_date"], '%Y-%m-%d')
+                    next_date = last_date_obj + timedelta(days=1)
+                    return next_date.strftime('%Y-%m-%d')
+                except:
+                    # 如果日期格式不对，直接返回
+                    return result["trade_date"]
             return None
             
         except Exception as e:
