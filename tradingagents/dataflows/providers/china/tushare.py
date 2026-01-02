@@ -749,7 +749,7 @@ class TushareProvider(BaseStockDataProvider):
 
             if df is None or df.empty:
                 self.logger.warning(
-                    f"⚠️ Tushare API 返回空数据: symbol={symbol}, ts_code={ts_code}, "
+                    f"⚠️ Tushare API 返回空数据: full_symbol={symbol}, ts_code={ts_code}, "
                     f"period={period}, start={start_str}, end={end_str}"
                 )
                 self.logger.warning(
@@ -772,7 +772,7 @@ class TushareProvider(BaseStockDataProvider):
             import traceback
             error_details = traceback.format_exc()
             self.logger.error(
-                f"❌ 获取历史数据失败 symbol={symbol}, period={period}\n"
+                f"❌ 获取历史数据失败 full_symbol={symbol}, period={period}\n"
                 f"   参数: ts_code={ts_code if 'ts_code' in locals() else 'N/A'}, "
                 f"start={start_str if 'start_st' in locals() else 'N/A'}, "
                 f"end={end_str if 'end_str' in locals() else 'N/A'}\n"
