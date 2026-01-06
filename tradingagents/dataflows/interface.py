@@ -1626,7 +1626,173 @@ def get_china_stock_data_unified(
                     }, exc_info=True)
         return f"❌ 获取{ticker}股票数据失败: {e}"
 
+def get_china_index_data_unified(
+    ticker: Annotated[str, "中国A股指数代码，如：000001.SH、399324.SZ等"],
+    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
+    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    统一的中国A股指数数据获取接口
+    自动使用配置的数据源（默认Tushare），支持备用数据源
 
+    Args:
+        ticker: 指数代码
+        start_date: 开始日期
+        end_date: 结束日期
+
+    Returns:
+        str: 格式化的指数数据报告
+    """
+    # 🔧 智能日期范围处理：自动扩展到配置的回溯天数，处理周末/节假日
+    from tradingagents.utils.dataflow_utils import get_trading_date_range
+    from app.core.config import get_settings
+
+    original_start_date = start_date
+    original_end_date = end_date
+
+    # 从配置获取市场分析回溯天数（默认30天）
+    try:
+        settings = get_settings()
+        lookback_days = settings.MARKET_ANALYST_LOOKBACK_DAYS
+        logger.info(f"📅 [配置验证] ===== MARKET_ANALYST_LOOKBACK_DAYS 配置检查 =====")
+        logger.info(f"📅 [配置验证] 从配置文件读取: {lookback_days}天")
+        logger.info(f"📅 [配置验证] 配置来源: app.core.config.Settings")
+        logger.info(f"📅 [配置验证] 环境变量: MARKET_ANALYST_LOOKBACK_DAYS={lookback_days}")
+    except Exception as e:
+        lookback_days = 30  # 默认30天
+        logger.warning(f"⚠️ [配置验证] 无法获取配置，使用默认值: {lookback_days}天")
+        logger.warning(f"⚠️ [配置验证] 错误详情: {e}")
+
+    # 使用 end_date 作为目标日期，向前回溯指定天数
+    start_date, end_date = get_trading_date_range(end_date, lookback_days=lookback_days)
+
+    logger.info(f"📅 [智能日期] ===== 日期范围计算结果 =====")
+    logger.info(f"📅 [智能日期] 原始输入: {original_start_date} 至 {original_end_date}")
+    logger.info(f"📅 [智能日期] 回溯天数: {lookback_days}天")
+    logger.info(f"📅 [智能日期] 计算结果: {start_date} 至 {end_date}")
+    logger.info(f"📅 [智能日期] 实际天数: {(datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')).days}天")
+    logger.info(f"💡 [智能日期] 说明: 自动扩展日期范围以处理周末、节假日和数据延迟")
+
+    # 记录详细的输入参数
+    logger.info(f"📊 [统一接口] 开始获取中国指数数据",
+               extra={
+                   'function': 'get_china_index_data_unified',
+                   'ticker': ticker,
+                   'start_date': start_date,
+                   'end_date': end_date,
+                   'event_type': 'unified_data_call_start'
+               })
+
+    # 添加详细的股票代码追踪日志
+    logger.info(f"🔍 [指数代码追踪] get_china_index_data_unified 接收到的原始股票代码: '{ticker}' (类型: {type(ticker)})")
+    logger.info(f"🔍 [指数代码追踪] 指数代码长度: {len(str(ticker))}")
+    logger.info(f"🔍 [指数代码追踪] 指数代码字符: {list(str(ticker))}")
+
+    start_time = time.time()
+
+    try:
+        from .data_source_manager import get_china_index_data_unified
+
+        result = get_china_index_data_unified(ticker, start_date, end_date)
+
+        # 记录详细的输出结果
+        duration = time.time() - start_time
+        result_length = len(result) if result else 0
+        is_success = result and "❌" not in result and "错误" not in result
+
+        if is_success:
+            logger.info(f"✅ [统一接口] 中国A股指数数据获取成功",
+                       extra={
+                           'function': 'get_china_index_data_unified',
+                           'ticker': ticker,
+                           'start_date': start_date,
+                           'end_date': end_date,
+                           'duration': duration,
+                           'result_length': result_length,
+                           'result_preview': result[:300] + '...' if result_length > 300 else result,
+                           'event_type': 'unified_data_call_success'
+                       })
+        else:
+            logger.warning(f"⚠️ [统一接口] 中国A股指数数据质量异常",
+                          extra={
+                              'function': 'get_china_index_data_unified',
+                              'ticker': ticker,
+                              'start_date': start_date,
+                              'end_date': end_date,
+                              'duration': duration,
+                              'result_length': result_length,
+                              'result_preview': result[:300] + '...' if result_length > 300 else result,
+                              'event_type': 'unified_data_call_warning'
+                          })
+
+        return result
+
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"❌ [统一接口] 获取指数数据失败: {e}",
+                    extra={
+                        'function': 'get_china_index_data_unified',
+                        'ticker': ticker,
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'duration': duration,
+                        'error': str(e),
+                        'event_type': 'unified_data_call_error'
+                    }, exc_info=True)
+        return f"❌ 获取{ticker}指数数据失败: {e}"
+
+def get_china_index_info_unified(
+    ticker: Annotated[str, "中国A股指数代码，如：000001.SZ、399324.SZ等"]
+) -> str:
+    """
+    统一的中国A股指数信息获取接口
+    自动使用配置的数据源（默认Tushare）
+
+    Args:
+        ticker: 指数代码
+
+    Returns:
+        str: 指数基本信息
+    """
+    try:
+        from .data_source_manager import get_china_index_info_unified
+
+        logger.info(f"📊 [统一接口] 获取{ticker}基本信息...")
+
+        info = get_china_index_info_unified(ticker)
+
+        if info and info.get('name'):
+            result = f"指数代码: {ticker}\n"
+            result += f"指数名称: {info.get('name', '未知')}\n"
+            result += f"指数类别: {info.get('category', '未知')}\n"
+            result += f"指数简介: {info.get('desc', '未知')}\n"
+            result += f"指数编制商: {info.get('publisher', '未知')}\n"
+            result += f"指数所属市场: {info.get('market', '未知')}\n"
+            result += f"上市日期: {info.get('list_date', '未知')}\n"
+            # 附加快照行情（若存在）
+            cp = info.get('current_price')
+            pct = info.get('change_pct')
+            vol = info.get('volume')
+            if cp is not None:
+                result += f"当前价格: {cp}\n"
+            if pct is not None:
+                try:
+                    pct_str = f"{float(pct):+.2f}%"
+                except Exception:
+                    pct_str = str(pct)
+                result += f"涨跌幅: {pct_str}\n"
+            if vol is not None:
+                result += f"成交量: {vol}\n"
+            result += f"数据来源: {info.get('source', 'unknown')}\n"
+
+            return result
+        else:
+            return f"❌ 未能获取{ticker}的基本信息"
+
+    except Exception as e:
+        logger.error(f"❌ [统一接口] 获取指数信息失败: {e}")
+        return f"❌ 获取{ticker}指数信息失败: {e}"
+    
 def get_china_stock_info_unified(
     ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
 ) -> str:

@@ -1080,7 +1080,7 @@ class Toolkit:
             is_us = market_info['is_us']
 
             logger.info(f"📈 [统一市场工具] 股票类型: {market_info['market_name']}")
-            logger.info(f"📈 [统一市场工具] 货币: {market_info['currency_name']} ({market_info['currency_symbol']}")
+            logger.info(f"📈 [统一市场工具] 货币: {market_info['currency_name']} ({market_info['currency_symbol']})")
 
             result_data = []
 
@@ -1140,6 +1140,90 @@ class Toolkit:
 
 ---
 *数据来源: 根据股票类型自动选择最适合的数据源*
+"""
+
+            logger.info(f"📈 [统一市场工具] 数据获取完成，总长度: {len(combined_result)}")
+            return combined_result
+
+        except Exception as e:
+            error_msg = f"统一市场数据工具执行失败: {str(e)}"
+            logger.error(f"❌ [统一市场工具] {error_msg}")
+            return error_msg
+        
+    @staticmethod
+    @tool
+    @log_tool_call(tool_name="get_index_market_data_unified", log_args=True)
+    def get_index_market_data_unified(
+        ticker: Annotated[str, "指数代码（申万指数、上证指数、深证指数、MSCI指数）"],
+        start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD。注意：系统会自动扩展到配置的回溯天数（通常为365天），你只需要传递分析日期即可"],
+        end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD。通常与start_date相同，传递当前分析日期即可"]
+    ) -> str:
+        """
+        统一的指数市场数据工具
+        根据指数代码调用相应的数据源获取价格和技术指标数据
+
+        ⚠️ 重要：系统会自动扩展日期范围到配置的回溯天数（通常为365天），以确保技术指标计算有足够的历史数据。
+        你只需要传递当前分析日期作为 start_date 和 end_date 即可，无需手动计算历史日期范围。
+
+        Args:
+            ticker: 指数代码（如：850833.SI、000001.SH、399324.SZ、106062.MI）
+            start_date: 开始日期（格式：YYYY-MM-DD）。传递当前分析日期即可，系统会自动扩展
+            end_date: 结束日期（格式：YYYY-MM-DD）。传递当前分析日期即可
+
+        Returns:
+            str: 市场数据和技术分析报告
+
+        示例：
+            如果分析日期是 2025-11-09，传递：
+            - ticker: "000001.SH"
+            - start_date: "2025-11-09"
+            - end_date: "2025-11-09"
+            系统会自动获取 2024-11-09 到 2025-11-09 的365天历史数据
+        """
+        logger.info(f"📈 [统一市场工具] 分析指数: {ticker}")
+
+        try:
+            from tradingagents.utils.index_utils import IndexUtils
+
+            # 自动识别指数市场
+            market_info = IndexUtils.get_market_info(ticker)
+            is_china = market_info['is_china']
+            is_hk = market_info['is_hk']
+            is_us = market_info['is_us']
+
+            logger.info(f"📈 [统一市场工具] 市场: {market_info['market_name']}")
+            logger.info(f"📈 [统一市场工具] 货币: {market_info['currency_name']} ({market_info['currency_symbol']})")
+
+            result_data = []
+
+            if is_china:
+                # 中国A股：使用中国A股指数数据源
+                logger.info(f"🇨🇳 [统一市场工具] 处理A股指数市场数据...")
+
+                try:
+                    from tradingagents.dataflows.interface import get_china_index_data_unified
+                    index_data = get_china_index_data_unified(ticker, start_date, end_date)
+
+                    # 🔍 调试：打印返回数据的前500字符
+                    logger.info(f"🔍 [市场工具调试] 中国A股指数数据返回长度: {len(index_data)}")
+                    logger.info(f"🔍 [市场工具调试] 中国A股指数数据前500字符:\n{index_data[:500]}")
+
+                    result_data.append(f"## 中国A股指数市场数据\n{index_data}")
+                except Exception as e:
+                    logger.error(f"❌ [市场工具调试] 中国A股指数市场数据获取失败: {e}")
+                    result_data.append(f"## 中国A股指数市场数据\n获取失败: {e}")
+
+            # 组合所有数据
+            combined_result = f"""# {ticker} 市场数据分析
+
+**指数市场**: {market_info['market_name']}
+**货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
+**分析期间**: {start_date} 至 {end_date}
+
+{chr(10).join(result_data)}
+
+---
+*数据来源: 根据指数代码自动选择最适合的数据源*
 """
 
             logger.info(f"📈 [统一市场工具] 数据获取完成，总长度: {len(combined_result)}")

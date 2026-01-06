@@ -376,6 +376,33 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取股票列表失败: {e}")
             return None
     
+    async def get_index_basic_info(self, symbol: str = None) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+        """获取指数基础信息"""
+        if not self.is_available():
+            return None
+        
+        try:
+            if symbol:
+                # 获取单个指数信息
+                ts_code = self._normalize_ts_code(symbol)
+                df = await asyncio.to_thread(
+                    self.api.index_basic,
+                    ts_code=ts_code,
+                    fields='ts_code,name,fullname,market,publisher,category,base_date,base_point,list_date,desc,exp_date'
+                )
+                
+                if df is None or df.empty:
+                    return None
+                
+                return self.standardize_index_basic_info(df.iloc[0].to_dict())
+            else:
+                # 获取所有指数信息
+                return await self.get_index_list()
+                
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数基础信息失败 symbol={symbol}: {e}")
+            return None
+        
     async def get_stock_basic_info(self, symbol: str = None) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         """获取股票基础信息"""
         if not self.is_available():

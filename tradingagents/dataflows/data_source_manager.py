@@ -1027,7 +1027,103 @@ class DataSourceManager:
             out['pct_change'] = out['close'].pct_change() * 100.0
 
         return out
+    
+    def get_index_data(self, full_symbol: str, start_date: str = None, end_date: str = None, period: str = "daily") -> str:
+        """
+        获取指数数据的统一接口，支持多周期数据
 
+        Args:
+            full_symbol: 指数代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期（daily/weekly/monthly），默认为daily
+
+        Returns:
+            str: 格式化的指数数据
+        """
+        # 记录详细的输入参数
+        logger.info(f"📊 [数据来源: {self.current_source.value}] 开始获取{period}数据: {full_symbol}",
+                   extra={
+                       'full_symbol': full_symbol,
+                       'start_date': start_date,
+                       'end_date': end_date,
+                       'period': period,
+                       'data_source': self.current_source.value,
+                       'event_type': 'data_fetch_start'
+                   })
+
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [指数代码追踪] DataSourceManager.get_index_data 接收到的指数代码: '{full_symbol}' (类型: {type(full_symbol)})")
+        logger.info(f"🔍 [指数代码追踪] 指数代码长度: {len(str(full_symbol))}")
+        logger.info(f"🔍 [指数代码追踪] 指数代码字符: {list(str(full_symbol))}")
+        logger.info(f"🔍 [指数代码追踪] 当前数据源: {self.current_source.value}")
+
+        start_time = time.time()
+
+        try:
+            # 根据数据源调用相应的获取方法
+            actual_source = None  # 实际使用的数据源
+
+            if self.current_source == ChinaDataSource.MONGODB:
+                result, actual_source = self._get_mongodb_index_data(full_symbol, start_date, end_date, period)
+            elif self.current_source == ChinaDataSource.TUSHARE:
+                logger.info(f"🔍 [指数代码追踪] 调用 Tushare 数据源，传入参数: full_symbol='{full_symbol}', period='{period}'")
+                result = self._get_tushare_index_data(full_symbol, start_date, end_date, period)
+                actual_source = "tushare"
+            # TDX 已移除
+            else:
+                result = f"❌ 不支持的数据源: {self.current_source.value}"
+                actual_source = None
+
+            # 记录详细的输出结果
+            duration = time.time() - start_time
+            result_length = len(result) if result else 0
+            is_success = result and "❌" not in result and "错误" not in result
+
+            # 使用实际数据源名称，如果没有则使用 current_source
+            display_source = actual_source or self.current_source.value
+
+            if is_success:
+                logger.info(f"✅ [数据来源: {display_source}] 成功获取指数数据: {full_symbol} ({result_length}字符, 耗时{duration:.2f}秒)",
+                           extra={
+                               'full_symbol': full_symbol,
+                               'start_date': start_date,
+                               'end_date': end_date,
+                               'data_source': display_source,
+                               'actual_source': actual_source,
+                               'requested_source': self.current_source.value,
+                               'duration': duration,
+                               'result_length': result_length,
+                               'result_preview': result[:200] + '...' if result_length > 200 else result,
+                               'event_type': 'data_fetch_success'
+                           })
+                return result
+            else:
+                logger.warning(f"⚠️ [数据来源: {self.current_source.value}失败] 数据质量异常，尝试降级到其他数据源: {full_symbol}",
+                              extra={
+                                  'full_symbol': full_symbol,
+                                  'start_date': start_date,
+                                  'end_date': end_date,
+                                  'data_source': self.current_source.value,
+                                  'duration': duration,
+                                  'result_length': result_length,
+                                  'result_preview': result[:200] + '...' if result_length > 200 else result,
+                                  'event_type': 'data_fetch_warning'
+                              })
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"❌ [数据获取] 异常失败: {e}",
+                        extra={
+                            'full_symbol': full_symbol,
+                            'start_date': start_date,
+                            'end_date': end_date,
+                            'data_source': self.current_source.value,
+                            'duration': duration,
+                            'error': str(e),
+                            'event_type': 'data_fetch_exception'
+                        }, exc_info=True)
+        
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None, period: str = "daily") -> str:
         """
         获取股票数据的统一接口，支持多周期数据
@@ -1140,6 +1236,44 @@ class DataSourceManager:
                         }, exc_info=True)
             return self._try_fallback_sources(symbol, start_date, end_date)
 
+    def _get_mongodb_index_data(self, full_symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
+        """
+        从MongoDB获取多周期数据 - 包含技术指标计算
+
+        Returns:
+            tuple[str, str | None]: (结果字符串, 实际使用的数据源名称)
+        """
+        logger.debug(f"📊 [MongoDB] 调用参数: full_symbol={full_symbol}, start_date={start_date}, end_date={end_date}, period={period}")
+
+        try:
+            from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
+            adapter = get_mongodb_cache_adapter()
+
+            # 从MongoDB获取指定周期的历史数据
+            df = adapter.get_historical_index_data(full_symbol, start_date, end_date, period=period)
+
+            if df is not None and not df.empty:
+                logger.info(f"✅ [数据来源: MongoDB缓存] 成功获取{period}数据: {full_symbol} ({len(df)}条记录)")
+
+                # 🔧 修复：使用统一的格式化方法，包含技术指标计算
+                # 获取指数名称（从DataFrame中提取或使用默认值）
+                index_name = f'指数{full_symbol}'
+                if 'name' in df.columns and not df['name'].empty:
+                    index_name = df['name'].iloc[0]
+
+                # 调用统一的格式化方法（包含技术指标计算）
+                result = self._format_stock_data_response(df, full_symbol, index_name, start_date, end_date)
+
+                logger.info(f"✅ [MongoDB] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
+                return result, "mongodb"
+            else:
+                # MongoDB没有数据（adapter内部已记录详细的数据源信息），降级到其他数据源
+                logger.info(f"🔄 [MongoDB] 未找到{period}数据: {full_symbol}，开始尝试备用数据源")
+                
+
+        except Exception as e:
+            logger.error(f"❌ [数据来源: MongoDB异常] 获取{period}数据失败: {symbol}, 错误: {e}")
+        
     def _get_mongodb_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """
         从MongoDB获取多周期数据 - 包含技术指标计算
@@ -1180,6 +1314,70 @@ class DataSourceManager:
             # MongoDB异常，降级到其他数据源
             return self._try_fallback_sources(symbol, start_date, end_date, period)
 
+    def _get_tushare_index_data(self, full_symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
+        """使用Tushare获取多周期数据 - 使用provider"""
+        logger.debug(f"📊 [Tushare] 调用参数: full_symbol={full_symbol}, start_date={start_date}, end_date={end_date}, period={period}")
+
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [指数代码追踪] _get_tushare_index_data 接收到的股票代码: '{full_symbol}' (类型: {type(full_symbol)})")
+        logger.info(f"🔍 [指数代码追踪] 指数代码长度: {len(str(full_symbol))}")
+        logger.info(f"🔍 [指数代码追踪] 指数代码字符: {list(str(full_symbol))}")
+        logger.info(f"🔍 [DataSourceManager详细日志] _get_tushare_index_data 开始执行")
+        logger.info(f"🔍 [DataSourceManager详细日志] 当前数据源: {self.current_source.value}")
+
+        start_time = time.time()
+        try:
+            # 1.从provider获取
+            logger.info(f"🔍 [指数代码追踪] 调用 tushare_provider，传入参数: full_symbol='{full_symbol}'")
+            logger.info(f"🔍 [DataSourceManager详细日志] 开始调用tushare_provider...")
+
+            provider = self._get_tushare_adapter()
+            if not provider:
+                return f"❌ Tushare提供器不可用"
+
+            # 使用异步方法获取历史数据
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                # 在线程池中没有事件循环，创建新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            data = loop.run_until_complete(provider.get_historical_index_data(full_symbol, start_date, end_date))
+
+            if data is not None and not data.empty:
+
+                # 获取指数基本信息（异步）
+                index_info = loop.run_until_complete(provider.get_index_basic_info(full_symbol))
+                index_name = index_info.get('name', f'指数{full_symbol}') if index_info else f'指数{full_symbol}'
+
+                # 格式化返回，数据格式与股票一致
+                result = self._format_stock_data_response(data, full_symbol, index_name, start_date, end_date)
+
+                duration = time.time() - start_time
+                logger.info(f"🔍 [DataSourceManager详细日志] 调用完成，耗时: {duration:.3f}秒")
+                logger.info(f"🔍 [指数代码追踪] 返回结果前200字符: {result[:200] if result else 'None'}")
+                logger.debug(f"📊 [Tushare] 调用完成: 耗时={duration:.2f}s, 结果长度={len(result) if result else 0}")
+
+                return result
+            else:
+                result = f"❌ 未获取到{full_symbol}的有效数据"
+                duration = time.time() - start_time
+                logger.warning(f"⚠️ [Tushare] 未获取到数据，耗时={duration:.2f}s")
+                return result
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"❌ [Tushare] 调用失败: {e}, 耗时={duration:.2f}s", exc_info=True)
+            logger.error(f"❌ [DataSourceManager详细日志] 异常类型: {type(e).__name__}")
+            logger.error(f"❌ [DataSourceManager详细日志] 异常信息: {str(e)}")
+            import traceback
+            logger.error(f"❌ [DataSourceManager详细日志] 异常堆栈: {traceback.format_exc()}")
+            raise
+        
     def _get_tushare_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
         """使用Tushare获取多周期数据 - 使用provider + 统一缓存"""
         logger.debug(f"📊 [Tushare] 调用参数: symbol={symbol}, start_date={start_date}, end_date={end_date}, period={period}")
@@ -1422,6 +1620,54 @@ class DataSourceManager:
         logger.error(f"❌ [所有数据源失败] 无法获取{period}数据: {symbol}")
         return f"❌ 所有数据源都无法获取{symbol}的{period}数据", None
 
+    def get_index_info(self, symbol: str) -> Dict:
+        """
+        获取指数基本信息，支持多数据源和自动降级
+        优先级：MongoDB → Tushare → AKShare → BaoStock
+        """
+        logger.info(f"📊 [数据来源: {self.current_source.value}] 开始获取指数信息: {symbol}")
+
+        # 优先使用 App Mongo 缓存（当 ta_use_app_cache=True）
+        try:
+            from tradingagents.config.runtime_settings import use_app_cache_enabled  # type: ignore
+            use_cache = use_app_cache_enabled(False)
+            logger.info(f"🔧 [配置检查] use_app_cache_enabled() 返回值: {use_cache}")
+        except Exception as e:
+            logger.error(f"❌ [配置检查] use_app_cache_enabled() 调用失败: {e}", exc_info=True)
+            use_cache = False
+
+        logger.info(f"🔧 [配置] ta_use_app_cache={use_cache}, current_source={self.current_source.value}")
+
+        if use_cache:
+
+            try:
+                from .cache.app_adapter import get_index_basics_from_cache
+                doc = get_index_basics_from_cache(symbol)
+                if doc:
+                    name = doc.get('name') or doc.get('index_name') or ''
+                    index_category = (doc.get('category') or doc.get('category_name') or '').strip()
+                    index_desc = (doc.get('desc') or '').strip()
+                    index_market = (doc.get('market') or '').strip()
+                    index_publisher = (doc.get('market') or '').strip()
+
+                    result = {
+                        'symbol': symbol,
+                        'name': name or f'指数{symbol}',
+                        'category': index_category,
+                        'market': index_market,
+                        'desc': index_desc,
+                        'list_date': doc.get('list_date', '未知'),
+                        'source': 'app_cache'
+                    }
+
+                    if name:
+                        logger.info(f"✅ [数据来源: MongoDB-index_basic_info] 成功获取: {symbol}")
+                        return result
+                    else:
+                        logger.warning(f"⚠️ [数据来源: MongoDB] 未找到有效名称: {symbol}，降级到其他数据源")
+            except Exception as e:
+                logger.error(f"❌ [数据来源: MongoDB异常] 获取指数信息失败: {e}", exc_info=True)
+        
     def get_stock_info(self, symbol: str) -> Dict:
         """
         获取股票基本信息，支持多数据源和自动降级
@@ -2137,6 +2383,41 @@ def get_data_source_manager() -> DataSourceManager:
         _data_source_manager = DataSourceManager()
     return _data_source_manager
 
+def get_china_index_data_unified(full_symbol:str, start_date:str, end_date:str) -> str:
+    """
+    统一的中国A股指数数据获取接口
+    自动使用配置的数据源，支持备用数据源
+    
+    Args:
+        full_symbol: 指数代码
+        start_date: 开始日期
+        end_date: 结束日期
+    Returns:
+        str: 格式化的指数数据
+    """
+    from tradingagents.utils.logging_init import get_logger
+
+
+    # 添加详细的指数代码追踪日志
+    logger.info(f"🔍 [指数代码追踪] data_source_manager.get_index_data_unified 接收到的股票代码: '{full_symbol}' (类型: {type(full_symbol)})")
+    logger.info(f"🔍 [指数代码追踪] 指数代码长度: {len(str(full_symbol))}")
+    logger.info(f"🔍 [指数代码追踪] 指数代码字符: {list(str(full_symbol))}")
+
+    manager = get_data_source_manager()
+    logger.info(f"🔍 [指数代码追踪] 调用 manager.get_index_data，传入参数: symbol='{full_symbol}', start_date='{start_date}', end_date='{end_date}'")
+    result = manager.get_index_data(full_symbol, start_date, end_date)
+    # 分析返回结果的详细信息
+    if result:
+        lines = result.split('\n')
+        data_lines = [line for line in lines if '2025-' in line and full_symbol in line]
+        logger.info(f"🔍 [指数代码追踪] 返回结果统计: 总行数={len(lines)}, 数据行数={len(data_lines)}, 结果长度={len(result)}字符")
+        logger.info(f"🔍 [指数代码追踪] 返回结果前500字符: {result[:500]}")
+        if len(data_lines) > 0:
+            logger.info(f"🔍 [指数代码追踪] 数据行示例: 第1行='{data_lines[0][:100]}', 最后1行='{data_lines[-1][:100]}'")
+    else:
+        logger.info(f"🔍 [指数代码追踪] 返回结果: None")
+    return result
+
 
 def get_china_stock_data_unified(symbol: str, start_date: str, end_date: str) -> str:
     """
@@ -2187,6 +2468,19 @@ def get_china_stock_info_unified(symbol: str) -> Dict:
     """
     manager = get_data_source_manager()
     return manager.get_stock_info(symbol)
+
+def get_china_index_info_unified(symbol: str) -> Dict:
+    """
+    统一的中国A股指数信息获取接口
+
+    Args:
+        symbol: 指数代码
+
+    Returns:
+        Dict: 指数基本信息
+    """
+    manager = get_data_source_manager()
+    return manager.get_index_info(symbol)
 
 
 # 全局数据源管理器实例

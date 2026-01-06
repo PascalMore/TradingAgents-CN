@@ -56,10 +56,11 @@ except ImportError:
 
 # 导入应用缓存适配器（函数，非类）
 try:
-    from .app_adapter import get_basics_from_cache, get_market_quote_dataframe
+    from .app_adapter import get_basics_from_cache, get_index_basics_from_cache, get_market_quote_dataframe
     APP_CACHE_AVAILABLE = True
 except ImportError:
     get_basics_from_cache = None
+    get_index_basics_from_cache = None
     get_market_quote_dataframe = None
     APP_CACHE_AVAILABLE = False
 
@@ -131,6 +132,7 @@ __all__ = [
 
     # 应用缓存适配器
     'get_basics_from_cache',
+    'get_index_basics_from_cache',
     'get_market_quote_dataframe',
     'APP_CACHE_AVAILABLE',
 

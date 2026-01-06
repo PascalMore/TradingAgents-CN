@@ -3,6 +3,7 @@
 App 缓存读取适配器（TradingAgents -> app MongoDB 集合）
 - 基本信息集合：stock_basic_info
 - 行情集合：market_quotes
+- 指数信息集合: index_basic_info
 
 当启用 ta_use_app_cache 时，作为优先数据源；未命中部分由上层继续回退到直连数据源。
 """
@@ -24,8 +25,49 @@ except Exception:  # pragma: no cover - 弱依赖
 
 BASICS_COLLECTION = "stock_basic_info"
 QUOTES_COLLECTION = "market_quotes"
+INDEX_BASIC_COLLECTION = "index_basic_info"
 
-
+def get_index_basics_from_cache(index_code: Optional[str] = None) -> Optional[Dict[str, Any] | List[Dict[str, Any]]]:
+    """从 app 的 index_basic_info 读取基础信息。"""
+    if get_mongodb_client is None:
+        return None
+    client = get_mongodb_client()
+    if not client:
+        return None
+    try:
+        # 数据库名取自 DatabaseManager 内部配置
+        db_name = None
+        try:
+            # 访问 DatabaseManager 暴露的配置
+            from tradingagents.config.database_manager import get_database_manager  # type: ignore
+            db_name = get_database_manager().mongodb_config.get("database", "tradingagents")
+        except Exception:
+            db_name = "tradingagents"
+        db = client[db_name]
+        coll = db[INDEX_BASIC_COLLECTION]
+        if index_code:
+            try:
+                _logger.debug(f"[app_cache] 查询基础信息 | db={db_name} coll={INDEX_BASIC_COLLECTION} code={index_code}")
+            except Exception:
+                pass
+            doc = coll.find_one({"$or": [{"full_symbol": index_code}, {"symbol": index_code}]})
+            if not doc:
+                try:
+                    _logger.debug(f"[app_cache] 基础信息未命中 | db={db_name} coll={INDEX_BASIC_COLLECTION} code={index_code}")
+                except Exception:
+                    pass
+            return doc or None
+        else:
+            cursor = coll.find({})
+            docs = list(cursor)
+            return docs or None
+    except Exception as e:
+        try:
+            _logger.debug(f"[app_cache] 指数基本信息读取异常（忽略）: {e}")
+        except Exception:
+            pass
+        return None
+    
 def get_basics_from_cache(stock_code: Optional[str] = None) -> Optional[Dict[str, Any] | List[Dict[str, Any]]]:
     """从 app 的 stock_basic_info 读取基础信息。"""
     if get_mongodb_client is None:

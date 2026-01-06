@@ -157,6 +157,66 @@ class MongoDBCacheAdapter:
         logger.info(f"📊 [数据源优先级] 使用默认顺序: ['tushare', 'akshare', 'baostock']")
         return ['tushare', 'akshare', 'baostock']
 
+    def get_historical_index_data(self, symbol: str, start_date: str = None, end_date: str = None,
+                          period: str = "daily") -> Optional[pd.DataFrame]:
+        """
+        获取历史数据，支持多周期，按数据源优先级查询
+
+        Args:
+            symbol: 指数代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期（daily/weekly/monthly），默认为daily
+
+        Returns:
+            DataFrame: 历史数据
+        """
+        if not self.use_app_cache or self.db is None:
+            return None
+
+        try:
+            collection = self.db.index_daily_quotes
+
+            # 获取数据源优先级
+            #priority_order = self._get_data_source_priority(symbol)
+
+            # 按优先级查询
+            for data_source in  ["tushare", "akshare", "baostock"]:
+                # 构建查询条件
+                query = {
+                    "full_symbol": symbol,
+                    "period": period,
+                    "data_source": data_source  # 指定数据源
+                }
+
+                if start_date:
+                    query["trade_date"] = {"$gte": start_date}
+                if end_date:
+                    if "trade_date" in query:
+                        query["trade_date"]["$lte"] = end_date
+                    else:
+                        query["trade_date"] = {"$lte": end_date}
+
+                # 查询数据
+                logger.debug(f"🔍 [MongoDB查询] 尝试数据源: {data_source}, symbol={symbol}, period={period}")
+                cursor = collection.find(query, {"_id": 0}).sort("trade_date", 1)
+                data = list(cursor)
+
+                if data:
+                    df = pd.DataFrame(data)
+                    logger.info(f"✅ [数据来源: MongoDB-{data_source}] {symbol}, {len(df)}条记录 (period={period})")
+                    return df
+                else:
+                    logger.debug(f"⚠️ [MongoDB-{data_source}] 未找到{period}数据: {symbol}")
+
+            # 所有数据源都没有数据
+            logger.warning(f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join([["tushare", "akshare", "baostock"]])})都没有{period}数据: {symbol}，降级到其他数据源")
+            return None
+
+        except Exception as e:
+            logger.warning(f"⚠️ 获取历史数据失败: {e}")
+            return None
+        
     def get_historical_data(self, symbol: str, start_date: str = None, end_date: str = None,
                           period: str = "daily") -> Optional[pd.DataFrame]:
         """
