@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from app.core.database import init_db, get_mongo_db
 from app.models.config import LLMProvider
+from tradingagents.llm_clients.provider_keys import canonical_aliases
 
 async def init_providers():
     """初始化大模型厂家数据"""
@@ -56,12 +57,13 @@ async def init_providers():
             "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
         },
         {
-            "name": "zhipu",
+            "name": "glm",
             "display_name": "智谱AI",
             "description": "智谱AI提供GLM系列中文大模型",
             "website": "https://zhipuai.cn",
             "api_doc_url": "https://open.bigmodel.cn/doc",
             "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "aliases": canonical_aliases("glm"),
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
@@ -76,12 +78,13 @@ async def init_providers():
             "supported_features": ["chat", "completion", "function_calling", "streaming"]
         },
         {
-            "name": "dashscope",
+            "name": "qwen",
             "display_name": "阿里云百炼",
             "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
             "website": "https://bailian.console.aliyun.com",
             "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
             "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "aliases": canonical_aliases("qwen"),
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
@@ -104,6 +107,16 @@ async def init_providers():
             "default_base_url": "https://api.302.ai/v1",
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "image", "vision", "function_calling", "streaming"]
+        },
+        {
+            "name": "aihubmix",
+            "display_name": "AIHubMix",
+            "description": "AIHubMix 深度适配 OpenAI、Claude、Gemini、DeepSeek、智谱、千问 等全球顶级模型，多模型交叉验证，分析结论更可靠；无限并发永远在线，A股、港股、美股行情随时可分析，不卡顿不排队；内置 coding-glm-5.1-free 等多款免费模型，零成本体验 AI 分析；按量计费、价格透明，长期使用性价比远超单一厂商。",
+            "website": "https://aihubmix.com/?aff=2rIi",
+            "api_doc_url": "https://docs.aihubmix.com/cn/quick-start",
+            "default_base_url": "https://aihubmix.com/v1",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
         }
     ]
     

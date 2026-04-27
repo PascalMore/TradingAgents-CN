@@ -93,8 +93,13 @@
           </template>
 
           <div v-loading="providersLoading">
-            <el-table :data="providers" style="width: 100%">
-              <el-table-column label="厂家信息" width="200">
+            <el-table
+              :data="providers"
+              style="width: 100%"
+              class="provider-table"
+              table-layout="auto"
+            >
+              <el-table-column label="厂家信息" min-width="180">
                 <template #default="{ row }">
                   <div class="provider-info">
                     <div class="provider-name">{{ row.display_name }}</div>
@@ -102,7 +107,7 @@
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="API密钥" width="120">
+              <el-table-column label="API密钥" width="108" align="center">
                 <template #default="{ row }">
                   <div class="api-key-status">
                     <el-tag
@@ -114,8 +119,14 @@
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column prop="description" label="描述" />
-              <el-table-column label="状态" width="120">
+              <el-table-column label="描述" min-width="420" class-name="provider-description-column">
+                <template #default="{ row }">
+                  <div class="provider-description">
+                    {{ row.description || '暂无描述' }}
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="108">
                 <template #default="{ row }">
                   <div class="status-column">
                     <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
@@ -132,7 +143,7 @@
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="支持功能" width="200">
+              <el-table-column label="支持功能" min-width="180">
                 <template #default="{ row }">
                   <div class="features">
                     <el-tag
@@ -146,37 +157,39 @@
                   </div>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="280" fixed="right">
+              <el-table-column label="操作" min-width="220" fixed="right">
                 <template #default="{ row }">
-                  <el-button
-                    size="small"
-                    @click.stop="editProvider(row)"
-                  >
-                    编辑
-                  </el-button>
-                  <el-button
-                    v-if="row.extra_config?.has_api_key"
-                    size="small"
-                    type="info"
-                    @click.stop="testProviderAPI(row)"
-                    :loading="testingProviders[row.id]"
-                  >
-                    测试
-                  </el-button>
-                  <el-button
-                    size="small"
-                    :type="row.is_active ? 'warning' : 'success'"
-                    @click.stop="toggleProvider(row)"
-                  >
-                    {{ row.is_active ? '禁用' : '启用' }}
-                  </el-button>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    @click.stop="deleteProvider(row)"
-                  >
-                    删除
-                  </el-button>
+                  <div class="provider-row-actions">
+                    <el-button
+                      size="small"
+                      @click.stop="editProvider(row)"
+                    >
+                      编辑
+                    </el-button>
+                    <el-button
+                      v-if="row.extra_config?.has_api_key"
+                      size="small"
+                      type="info"
+                      @click.stop="testProviderAPI(row)"
+                      :loading="testingProviders[row.id]"
+                    >
+                      测试
+                    </el-button>
+                    <el-button
+                      size="small"
+                      :type="row.is_active ? 'warning' : 'success'"
+                      @click.stop="toggleProvider(row)"
+                    >
+                      {{ row.is_active ? '禁用' : '启用' }}
+                    </el-button>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      @click.stop="deleteProvider(row)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -1088,9 +1101,7 @@ import {
   Key,
   OfficeBuilding,
   CircleCheck,
-  Collection,
-  Star,
-  Money
+  Collection
 } from '@element-plus/icons-vue'
 
 import {
@@ -1112,11 +1123,27 @@ import MarketCategoryManagement from './components/MarketCategoryManagement.vue'
 import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
 
+type ProviderInfoSummary = {
+  display_name: string
+  description: string
+  is_active: boolean
+}
+
+type LLMConfigGroup = {
+  provider: string
+  display_name: string
+  description: string
+  is_active: boolean
+  models: LLMConfig[]
+}
+
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // 响应式数据
 const activeTab = ref('validation')
 const providers = ref<LLMProvider[]>([])
 const llmConfigs = ref<LLMConfig[]>([])
-const llmConfigGroups = ref<any[]>([])
+const llmConfigGroups = ref<LLMConfigGroup[]>([])
 const dataSourceConfigs = ref<DataSourceConfig[]>([])
 const databaseConfigs = ref<DatabaseConfig[]>([])
 const systemSettings = ref<Record<string, any>>({})
@@ -1124,7 +1151,7 @@ const systemSettingsMeta = ref<Record<string, SettingMeta>>({})
 const defaultLLM = ref<string>('')
 
 // 厂家信息映射
-const providerInfoMap = ref<Record<string, any>>({})
+const providerInfoMap = ref<Record<string, ProviderInfoSummary>>({})
 const defaultDataSource = ref<string>('')
 
 // 新增：数据源分组相关
@@ -1228,7 +1255,7 @@ const availableModelsForProvider = (providerId: string) => {
     return config.provider === providerId && config.enabled
   })
   console.log(`✅ 找到 ${models.length} 个可用模型:`, models)
-  return models
+  return sortLLMConfigsByNewest(models)
 }
 
 // 加载厂家列表
@@ -1238,7 +1265,7 @@ const loadProviders = async () => {
     console.log('🔄 开始加载厂家列表...')
     const providerList = await configApi.getLLMProviders()
     console.log('📊 厂家列表响应:', providerList)
-    providers.value = providerList
+    providers.value = sortProvidersByNewest(providerList)
     console.log('✅ 厂家列表加载成功，数量:', providerList.length)
   } catch (error) {
     console.error('❌ 加载厂家列表失败:', error)
@@ -1248,13 +1275,33 @@ const loadProviders = async () => {
   }
 }
 
+const sortProvidersByNewest = (providerList: LLMProvider[]) => {
+  const getTimestamp = (provider: LLMProvider) => {
+    const timeValue = provider.created_at || provider.updated_at
+    const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+    return Number.isNaN(timestamp) ? 0 : timestamp
+  }
+
+  return [...providerList].sort((a, b) => getTimestamp(b) - getTimestamp(a))
+}
+
+const sortLLMConfigsByNewest = (configs: LLMConfig[]) => {
+  const getTimestamp = (config: LLMConfig) => {
+    const timeValue = config.created_at || config.updated_at
+    const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+    return Number.isNaN(timestamp) ? 0 : timestamp
+  }
+
+  return [...configs].sort((a, b) => getTimestamp(b) - getTimestamp(a))
+}
+
 const loadLLMConfigs = async () => {
   llmLoading.value = true
   try {
     console.log('🔄 开始加载大模型配置...')
     const configs = await configApi.getLLMConfigs()
     console.log('📊 大模型配置响应:', configs)
-    llmConfigs.value = configs
+    llmConfigs.value = sortLLMConfigsByNewest(configs)
     console.log('✅ 大模型配置加载成功，数量:', configs.length)
 
     // 获取默认LLM
@@ -1286,7 +1333,7 @@ const buildLLMConfigGroups = () => {
   })
 
   // 构建分组数据
-  const groups: any[] = []
+  const groups: LLMConfigGroup[] = []
 
   Object.entries(providerGroups).forEach(([provider, models]) => {
     // 获取厂家信息
@@ -1302,15 +1349,19 @@ const buildLLMConfigGroups = () => {
       display_name: providerInfo.display_name,
       description: providerInfo.description,
       is_active: providerInfo.is_active,
-      models: models.sort((a, b) => {
+      models: sortLLMConfigsByNewest(models).sort((a, b) => {
         // 默认模型排在前面
         if (a.model_name === defaultLLM.value) return -1
         if (b.model_name === defaultLLM.value) return 1
         // 启用的模型排在前面
         if (a.enabled && !b.enabled) return -1
         if (!a.enabled && b.enabled) return 1
-        // 按名称排序
-        return a.model_name.localeCompare(b.model_name)
+        // 其它模型按最新添加时间倒序
+        const aTime = a.created_at || a.updated_at
+        const bTime = b.created_at || b.updated_at
+        const aTimestamp = aTime ? new Date(aTime).getTime() : 0
+        const bTimestamp = bTime ? new Date(bTime).getTime() : 0
+        return (Number.isNaN(bTimestamp) ? 0 : bTimestamp) - (Number.isNaN(aTimestamp) ? 0 : aTimestamp)
       })
     }
 
@@ -1389,7 +1440,7 @@ const buildDataSourceGroups = () => {
           return null
         })
         .filter(Boolean)
-        .sort((a, b) => b.priority - a.priority) // 按优先级降序排列
+        .sort((a, b) => (b?.priority ?? 0) - (a?.priority ?? 0)) // 按优先级降序排列
 
       groups.push({
         categoryId: category.id,
@@ -1531,12 +1582,12 @@ const handleProviderSuccess = () => {
 const loadProviderInfoMap = async () => {
   try {
     const providerList = await configApi.getLLMProviders()
-    const map: Record<string, any> = {}
+    const map: Record<string, ProviderInfoSummary> = {}
 
     providerList.forEach(provider => {
       map[provider.name] = {
         display_name: provider.display_name,
-        description: provider.description,
+        description: provider.description || '',
         is_active: provider.is_active
       }
     })
@@ -1547,14 +1598,9 @@ const loadProviderInfoMap = async () => {
   }
 }
 
-// 刷新大模型配置数据
-const refreshLLMConfigs = () => {
-  buildLLMConfigGroups()
-}
-
 // 获取厂家标签类型
-const getProviderTagType = (provider: string) => {
-  const typeMap: Record<string, string> = {
+const getProviderTagType = (provider: string): TagType => {
+  const typeMap: Record<string, TagType> = {
     'openai': 'primary',
     'google': 'success',
     'anthropic': 'warning',
@@ -1580,15 +1626,14 @@ const getCapabilityLevelText = (level: number) => {
 }
 
 // 🆕 获取能力等级标签类型
-const getCapabilityLevelType = (level: number) => {
-  const typeMap: Record<number, string> = {
+const getCapabilityLevelType = (level: number): TagType | undefined => {
+  const typeMap: Partial<Record<number, TagType>> = {
     1: 'info',
-    2: '',
     3: 'success',
     4: 'warning',
     5: 'danger'
   }
-  return typeMap[level] || ''
+  return typeMap[level]
 }
 
 // 🆕 获取角色文本
@@ -1616,7 +1661,7 @@ const addModelToProvider = (providerRow: any) => {
   currentLLMConfig.value = {
     provider: providerRow.provider,
     model_name: '',
-    display_name: '',
+    model_display_name: '',
     description: '',
     enabled: true,
     max_tokens: 4000,
@@ -1635,7 +1680,7 @@ const addModelToProvider = (providerRow: any) => {
 }
 
 // 切换厂家状态
-const toggleProviderStatus = async (providerRow: any) => {
+const toggleProviderStatus = async (providerRow: LLMConfigGroup) => {
   try {
     const newStatus = !providerRow.is_active
     const action = newStatus ? '启用' : '禁用'
@@ -1779,18 +1824,6 @@ const handleLLMConfigSuccess = () => {
   loadLLMConfigs()
 }
 
-// 设置默认LLM
-const setDefaultLLM = async (modelName: string) => {
-  try {
-    await configApi.setDefaultLLM(modelName)
-    defaultLLM.value = modelName
-    buildLLMConfigGroups() // 重新构建分组以更新排序
-    ElMessage.success('默认大模型设置成功')
-  } catch (error) {
-    ElMessage.error('设置默认大模型失败')
-  }
-}
-
 // 测试LLM配置
 const testLLMConfig = async (config: LLMConfig) => {
   try {
@@ -1915,16 +1948,6 @@ const handleDataSourceGroupingSuccess = () => {
   buildDataSourceGroups()
 }
 
-const setDefaultDataSource = async (name: string) => {
-  try {
-    await configApi.setDefaultDataSource(name)
-    defaultDataSource.value = name
-    ElMessage.success('默认数据源设置成功')
-  } catch (error) {
-    ElMessage.error('设置默认数据源失败')
-  }
-}
-
 const testDataSource = async (config: DataSourceConfig) => {
   try {
     const result = await configApi.testConfig({
@@ -1999,7 +2022,7 @@ const testDatabase = async (config: DatabaseConfig) => {
     const result = await configApi.testDatabaseConfig(config.name)
 
     if (result.success) {
-      ElMessage.success(`数据库连接测试成功 (${result.response_time?.toFixed(2)}s)`)
+      ElMessage.success(`数据库连接测试成功`)
     } else {
       ElMessage.error(`数据库连接测试失败: ${result.message}`)
     }
@@ -2444,6 +2467,16 @@ onMounted(async () => {
   }
 
   // 厂家管理样式
+  .provider-table {
+    :deep(.el-table__cell) {
+      vertical-align: top;
+    }
+
+    :deep(.provider-description-column .cell) {
+      white-space: normal;
+    }
+  }
+
   .provider-info {
     .provider-name {
       font-weight: 500;
@@ -2457,7 +2490,18 @@ onMounted(async () => {
     }
   }
 
+  .provider-description {
+    color: var(--el-text-color-regular);
+    line-height: 1.7;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
   .features {
+    display: flex;
+    flex-wrap: wrap;
+
     .feature-tag {
       margin-right: 4px;
       margin-bottom: 4px;
@@ -2481,6 +2525,12 @@ onMounted(async () => {
       margin-top: 2px;
       font-family: monospace;
     }
+  }
+
+  .provider-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   // 卡片式布局样式
