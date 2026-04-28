@@ -1201,19 +1201,24 @@ class TushareSyncService:
 
     async def sync_financial_data(self, symbols: List[str] = None, limit: int = 20, job_id: str = None) -> Dict[str, Any]:
         """
-        同步财务数据
+        同步财务数据（增量模式）
+
+        问题修复：
+        1. 之前固定获取20期，现在根据本地 raw_data 最新报告期，只获取缺失的期数
+        2. 如果 raw_data 为空，从 19900101 开始
 
         Args:
             symbols: 股票代码列表，None表示同步所有股票
-            limit: 获取财报期数，默认20期（约5年数据）
+            limit: 获取财报期数上限（用于保护，避免一次获取过多），默认20期
             job_id: 任务ID（用于进度跟踪）
         """
-        logger.info(f"🔄 开始同步财务数据 (获取最近 {limit} 期)...")
+        logger.info(f"🔄 开始同步财务数据 (增量模式，limit={limit})...")
 
         stats = {
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
+            "skipped_count": 0,
             "start_time": datetime.utcnow(),
             "errors": []
         }
@@ -1237,14 +1242,75 @@ class TushareSyncService:
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
 
-            # 批量处理
+            # 🔥 批量查询本地 raw_data 最新报告期
+            # 对于每只股票，获取其 raw_data.income_statement 中的最新 end_date
+            local_latest_dates = {}
+            if symbols:
+                batch_size = 500
+                for batch_start in range(0, len(symbols), batch_size):
+                    batch_symbols = symbols[batch_start:batch_start + batch_size]
+                    
+                    # 使用 aggregation 来提取 raw_data.income_statement 中的最新 end_date
+                    pipeline = [
+                        {
+                            "$match": {
+                                "symbol": {"$in": batch_symbols},
+                                "data_source": "tushare",
+                                "raw_data.income_statement": {"$exists": True}
+                            }
+                        },
+                        {
+                            "$project": {
+                                "symbol": 1,
+                                "latest_end_date": {
+                                    "$let": {
+                                        "vars": {
+                                            "income_list": {"$ifNull": ["$raw_data.income_statement", []]}
+                                        },
+                                        "in": {
+                                            "$max": "$$income_list.end_date"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                    
+                    cursor = self.db.stock_financial_data.aggregate(pipeline)
+                    async for doc in cursor:
+                        sym = doc.get("symbol")
+                        latest_date = doc.get("latest_end_date")
+                        if sym and latest_date:
+                            # 取最大的日期（因为可能有多条记录）
+                            if sym not in local_latest_dates or latest_date > local_latest_dates[sym]:
+                                local_latest_dates[sym] = latest_date
+
+            logger.info(f"📊 批量查询完成: {len(local_latest_dates)} 只股票已有本地财务数据")
+
             for i, symbol in enumerate(symbols):
                 try:
+                    # 🔥 获取本地最新报告期
+                    local_latest_end_date = local_latest_dates.get(symbol)
+                    
+                    # 确定增量起始日期
+                    if local_latest_end_date:
+                        # 有本地数据，从本地最新日期的下一天开始
+                        start_date = self._increment_date(local_latest_end_date)
+                        logger.debug(f"📅 {symbol}: 本地已有数据，增量从 {start_date} 开始 (本地最新: {local_latest_end_date})")
+                    else:
+                        # 没有本地数据，从19900101开始全量获取
+                        start_date = "19900101"
+                        logger.debug(f"📅 {symbol}: 本地无数据，全量从 {start_date} 开始")
+
                     # 速率限制
                     await self.rate_limiter.acquire()
 
-                    # 获取财务数据（指定获取期数）
-                    financial_data = await self.provider.get_financial_data(symbol, limit=limit)
+                    # 🔥 调用 provider 获取财务数据，传入 start_date 参数
+                    financial_data = await self.provider.get_financial_data(
+                        symbol, 
+                        start_date=start_date,  # 增量起始日期
+                        limit=limit              # 限制获取期数
+                    )
 
                     if financial_data:
                         # 保存财务数据
@@ -1254,13 +1320,15 @@ class TushareSyncService:
                         else:
                             stats["error_count"] += 1
                     else:
-                        logger.warning(f"⚠️ {symbol}: 无财务数据")
+                        # 没有新数据，检查是否因为已达上限
+                        stats["skipped_count"] += 1
+                        logger.debug(f"⚠️ {symbol}: 无新财务数据 (start_date={start_date})")
 
                     # 进度日志和进度跟踪
                     if (i + 1) % 20 == 0:
                         progress = int((i + 1) / len(symbols) * 100)
                         logger.info(f"📈 财务数据同步进度: {i + 1}/{len(symbols)} ({progress}%) "
-                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']}, 无新数据: {stats['skipped_count']})")
                         # 输出速率限制器统计
                         limiter_stats = self.rate_limiter.get_stats()
                         logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次")
@@ -1301,6 +1369,7 @@ class TushareSyncService:
             logger.info(f"✅ 财务数据同步完成: "
                        f"成功 {stats['success_count']}/{stats['total_processed']}, "
                        f"错误 {stats['error_count']} 个, "
+                       f"无新数据 {stats['skipped_count']} 只, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
             return stats
@@ -1309,6 +1378,31 @@ class TushareSyncService:
             logger.error(f"❌ 财务数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
             return stats
+
+    def _increment_date(self, date_str: str) -> str:
+        """
+        将 YYYYMMDD 格式的日期加1天
+        
+        Args:
+            date_str: 日期字符串，格式 YYYYMMDD
+            
+        Returns:
+            加1天后的日期字符串
+        """
+        try:
+            year = int(date_str[:4])
+            month = int(date_str[4:6])
+            day = int(date_str[6:8])
+            
+            from datetime import date, timedelta
+            d = date(year, month, day)
+            next_day = d + timedelta(days=1)
+            
+            return next_day.strftime('%Y%m%d')
+        except Exception as e:
+            logger.warning(f"⚠️ 日期增加失败 {date_str}: {e}，返回原日期+1天")
+            # 出错时返回下一天（简单处理）
+            return date_str[:4] + date_str[4:6] + f"{int(date_str[6:8]) + 1:02d}"
 
     async def _save_financial_data(self, symbol: str, financial_data: Dict[str, Any]) -> bool:
         """保存财务数据"""
@@ -1708,6 +1802,113 @@ async def run_tushare_index_historical_sync(incremental: bool = True):
         raise
 
 
+    async def sync_historical_financial(self, start_year: int = None, end_year: int = None, job_id: str = None) -> Dict[str, Any]:
+        """
+        历史补全任务：回溯同步多年财务数据
+        
+        Args:
+            start_year: 起始年份，默认 2018
+            end_year: 结束年份，默认去年
+            job_id: 任务ID（用于进度跟踪）
+        """
+        from datetime import datetime
+        current_year = datetime.now().year
+        start_year = start_year or (current_year - 7)  # 默认回溯7年
+        end_year = end_year or (current_year - 1)
+
+        logger.info(f"🔄 开始历史财务数据补全 ({start_year}-{end_year})...")
+
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "start_time": datetime.utcnow(),
+            "errors": []
+        }
+
+        try:
+            # 获取股票列表
+            cursor = self.db.stock_basic_info.find(
+                {
+                    "$or": [
+                        {"market_info.market": "CN"},
+                        {"category": "stock_cn"},
+                        {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
+                    ]
+                },
+                {"code": 1}
+            )
+            symbols = [doc["code"] async for doc in cursor]
+            stats["total_processed"] = len(symbols)
+            logger.info(f"📋 需要补全 {len(symbols)} 只股票 {start_year}-{end_year} 年财务数据")
+
+            # 批量处理
+            for i, symbol in enumerate(symbols):
+                try:
+                    if job_id and await self._should_stop(job_id):
+                        logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                        stats["stopped"] = True
+                        break
+
+                    await self.rate_limiter.acquire()
+
+                    # 获取多年历史财务数据
+                    financial_data = await self.provider.get_financial_data(symbol, limit=100)  # 100期约25年
+
+                    if financial_data:
+                        # 只保留目标年份范围内的数据
+                        filtered_data = []
+                        if isinstance(financial_data, list):
+                            for item in financial_data:
+                                period = item.get("report_period", "")
+                                if period and len(period) >= 4:
+                                    year = int(period[:4])
+                                    if start_year <= year <= end_year:
+                                        filtered_data.append(item)
+                        elif isinstance(financial_data, dict):
+                            period = financial_data.get("report_period", "")
+                            if period and len(period) >= 4:
+                                year = int(period[:4])
+                                if start_year <= year <= end_year:
+                                    filtered_data = financial_data
+
+                        if filtered_data:
+                            success = await self._save_financial_data(symbol, filtered_data if isinstance(filtered_data, list) else financial_data)
+                            if success:
+                                stats["success_count"] += 1
+                            else:
+                                stats["error_count"] += 1
+                        else:
+                            stats["skipped_count"] += 1
+                    else:
+                        stats["skipped_count"] += 1
+
+                    if (i + 1) % 50 == 0:
+                        progress = int((i + 1) / len(symbols) * 100)
+                        logger.info(f"📈 历史财务补全进度: {i + 1}/{len(symbols)} ({progress}%) "
+                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']}, 跳过: {stats['skipped_count']})")
+                        if job_id:
+                            await self._update_progress(job_id, progress, f"补全 {symbol} ({i + 1}/{len(symbols)})")
+
+                except Exception as e:
+                    stats["error_count"] += 1
+                    stats["errors"].append({"code": symbol, "error": str(e), "context": "sync_historical_financial"})
+                    logger.error(f"❌ {symbol} 历史财务数据同步失败: {e}")
+
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+            logger.info(f"✅ 历史财务数据补全完成: "
+                       f"成功 {stats['success_count']}, 错误 {stats['error_count']}, 跳过 {stats['skipped_count']}, "
+                       f"耗时 {stats['duration']:.2f} 秒")
+            return stats
+
+        except Exception as e:
+            logger.error(f"❌ 历史财务数据补全失败: {e}")
+            stats["errors"].append({"error": str(e), "context": "sync_historical_financial"})
+            return stats
+
+
 async def run_tushare_financial_sync():
     """APScheduler任务：同步财务数据（获取最近20期，约5年）"""
     try:
@@ -1719,6 +1920,25 @@ async def run_tushare_financial_sync():
         logger.error(f"❌ Tushare财务数据同步失败: {e}")
         raise
 
+
+
+
+async def run_tushare_historical_financial_sync():
+    """APScheduler任务：补全历史财务数据（回溯7年）"""
+    try:
+        service = await get_tushare_sync_service()
+        from datetime import datetime
+        current_year = datetime.now().year
+        result = await service.sync_historical_financial(
+            start_year=current_year - 7,
+            end_year=current_year - 1,
+            job_id="tushare_historical_financial_sync"
+        )
+        logger.info(f"✅ Tushare历史财务数据补全完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Tushare历史财务数据补全失败: {e}")
+        raise
 
 async def run_tushare_status_check():
     """APScheduler任务：检查同步状态"""

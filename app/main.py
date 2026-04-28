@@ -47,6 +47,7 @@ from app.worker.tushare_sync_service import (
     run_tushare_historical_sync,
     run_tushare_index_historical_sync,
     run_tushare_financial_sync,
+    run_tushare_historical_financial_sync,
     run_tushare_status_check
 )
 from app.worker.akshare_sync_service import (
@@ -404,7 +405,7 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📊 Tushare历史指数数据同步已配置: {settings.TUSHARE_HISTORICAL_INDEX_SYNC_CRON}")
 
-        # 财务数据同步任务
+        # 财务数据同步任务（每日）
         scheduler.add_job(
             run_tushare_financial_sync,
             CronTrigger.from_crontab(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
@@ -416,6 +417,15 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ Tushare财务数据同步已添加但暂停: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
         else:
             logger.info(f"💰 Tushare财务数据同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
+
+        # 历史财务数据补全任务（每周日 04:00）
+        scheduler.add_job(
+            run_tushare_historical_financial_sync,
+            CronTrigger.from_crontab("0 4 * * 0", timezone=settings.TIMEZONE),
+            id="tushare_historical_financial_sync",
+            name="历史财务数据补全（Tushare）"
+        )
+        logger.info(f"📋 Tushare历史财务数据补全已配置: 0 4 * * 0 (每周日 04:00)")
 
         # 状态检查任务
         scheduler.add_job(

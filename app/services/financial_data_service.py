@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import pandas as pd
-from pymongo import ReplaceOne
+from pymongo import ReplaceOne, UpdateOne
 
 from app.core.database import get_mongo_db
 
@@ -73,6 +73,113 @@ class FinancialDataService:
             # 索引创建失败不应该阻止服务启动
             logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
     
+
+    def _merge_raw_data(self, existing_data: Dict[str, Any], new_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        合并 raw_data：
+        - 列表字段（income_statement, balance_sheet 等）：按 end_date 去重后追加，保留最新
+        - 其他字段：直接覆盖
+        - ⚠️ 同步更新外层 report_period（如果 new_data 的报告期更新）
+        """
+        if not existing_data:
+            # 即使是全新数据，也要对 raw_data 做去重（过滤 update_flag 重复）
+            if 'raw_data' in new_data and isinstance(new_data.get('raw_data'), dict):
+                _, latest_end_date = self._deep_merge_raw_dict_with_latest({}, new_data['raw_data'])
+                new_data = new_data.copy()
+                new_data['raw_data'] = new_data['raw_data'].copy()
+                # 重新从深度合并获取干净的数据
+                merged_clean, _ = self._deep_merge_raw_dict_with_latest({}, new_data['raw_data'])
+                new_data['raw_data'] = merged_clean
+                # 同步 report_period
+                if latest_end_date:
+                    new_data['report_period'] = latest_end_date
+            return new_data
+
+        merged = existing_data.copy()
+
+        # 用于跟踪最新报告期
+        latest_end_date = None
+
+        for key, value in new_data.items():
+            if key == 'raw_data':
+                existing_raw = merged.get('raw_data', {})
+                if isinstance(existing_raw, dict) and isinstance(value, dict):
+                    merged_raw, latest_in_raw = self._deep_merge_raw_dict_with_latest(existing_raw, value)
+                    merged['raw_data'] = merged_raw
+                    if latest_in_raw:
+                        latest_end_date = latest_in_raw
+                else:
+                    merged['raw_data'] = value
+            elif key in ('updated_at', 'version'):
+                continue
+            elif isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+
+        merged['updated_at'] = datetime.now(timezone.utc)
+        merged['version'] = merged.get('version', 0) + 1
+
+        # 🔥 同步外层 report_period：使用 raw_data 中的最新 end_date
+        if latest_end_date:
+            current_report_period = merged.get('report_period', '')
+            if not current_report_period or latest_end_date > current_report_period:
+                merged['report_period'] = latest_end_date
+                logger.debug(f"📊 同步外层 report_period: {current_report_period} -> {latest_end_date}")
+
+        return merged
+
+    def _deep_merge_raw_dict_with_latest(self, existing: Dict, new: Dict) -> tuple:
+        """
+        深度合并 raw_data 字典
+        - 列表字段（5张表）：追加合并
+        - 其他字段：直接覆盖
+        返回: (merged_dict, latest_end_date)
+        """
+        LIST_KEYS = ['income_statement', 'balance_sheet', 'cashflow_statement',
+                     'financial_indicators', 'main_business']
+
+        result = existing.copy()
+        latest_end_date = None
+
+        for key, value in new.items():
+            if key in LIST_KEYS and isinstance(value, list):
+                # Step 1: 对 existing_list 去重（按 end_date 去重，保留 update_flag 最高的版本）
+                existing_dedup_map = {}
+                for item in result.get(key, []):
+                    if isinstance(item, dict) and 'end_date' in item:
+                        end_date = item['end_date']
+                        update_flag = item.get('update_flag', 0) or 0
+                        if end_date not in existing_dedup_map or update_flag > existing_dedup_map[end_date][1]:
+                            existing_dedup_map[end_date] = (item, update_flag)
+                existing_dedup = [v[0] for v in existing_dedup_map.values()]
+                existing_periods = set(existing_dedup_map.keys())
+
+                # Step 2: 对 new_items 去重（按 end_date 去重，保留 update_flag 最高的版本）
+                new_dedup_map = {}
+                for item in value:
+                    if isinstance(item, dict) and 'end_date' in item:
+                        end_date = item['end_date']
+                        update_flag = item.get('update_flag', 0) or 0
+                        if end_date not in new_dedup_map or update_flag > new_dedup_map[end_date][1]:
+                            new_dedup_map[end_date] = (item, update_flag)
+
+                # Step 3: 合并（deduplicated existing + deduplicated new）
+                merged_list = existing_dedup.copy()
+                for item, _ in new_dedup_map.values():
+                    end_date = item.get('end_date')
+                    if end_date not in existing_periods:
+                        merged_list.append(item)
+                        existing_periods.add(end_date)
+                        # 跟踪最新 end_date
+                        if end_date and (latest_end_date is None or end_date > latest_end_date):
+                            latest_end_date = end_date
+                result[key] = merged_list
+            else:
+                result[key] = value
+
+        return result, latest_end_date
+
     async def save_financial_data(
         self,
         symbol: str,
@@ -126,9 +233,13 @@ class FinancialDataService:
                         "data_source": data_item["data_source"]
                     }
                     
+                    # 增量更新：先查询已有数据，合并 raw_data
+                    existing = await collection.find_one(filter_doc, {"_id": 0})
+                    merged_data = self._merge_raw_data(existing, data_item) if existing is not None else self._merge_raw_data({}, data_item)
+                    
                     operations.append(ReplaceOne(
                         filter=filter_doc,
-                        replacement=data_item,
+                        replacement=merged_data,
                         upsert=True
                     ))
                     saved_count += 1
@@ -140,9 +251,13 @@ class FinancialDataService:
                     "data_source": standardized_data["data_source"]
                 }
                 
+                # 增量更新：先查询已有数据，合并 raw_data
+                existing = await collection.find_one(filter_doc, {"_id": 0})
+                merged_data = self._merge_raw_data(existing, standardized_data) if existing is not None else self._merge_raw_data({}, standardized_data)
+                
                 operations.append(ReplaceOne(
                     filter=filter_doc,
-                    replacement=standardized_data,
+                    replacement=merged_data,
                     upsert=True
                 ))
                 saved_count = 1
