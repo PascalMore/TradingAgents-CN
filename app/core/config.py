@@ -104,6 +104,7 @@ class Settings(BaseSettings):
         }
 
     # Redis配置
+    REDIS_ENABLED: bool = Field(default=True, description="是否启用Redis")
     REDIS_HOST: str = Field(default="localhost")
     REDIS_PORT: int = Field(default=6379)
     REDIS_PASSWORD: str = Field(default="")

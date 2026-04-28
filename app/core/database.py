@@ -196,10 +196,15 @@ async def init_database():
         mongo_client = db_manager.mongo_client
         mongo_db = db_manager.mongo_db
 
-        # 初始化Redis
-        await db_manager.init_redis()
-        redis_client = db_manager.redis_client
-        redis_pool = db_manager.redis_pool
+        # 初始化Redis（如果启用）
+        if settings.REDIS_ENABLED:
+            await db_manager.init_redis()
+            redis_client = db_manager.redis_client
+            redis_pool = db_manager.redis_pool
+        else:
+            redis_client = None
+            redis_pool = None
+            logger.info("ℹ️ Redis已禁用")
 
         logger.info("🎉 所有数据库连接初始化完成")
 

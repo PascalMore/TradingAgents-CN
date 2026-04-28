@@ -210,7 +210,7 @@ class MongoDBCacheAdapter:
                     logger.debug(f"⚠️ [MongoDB-{data_source}] 未找到{period}数据: {symbol}")
 
             # 所有数据源都没有数据
-            logger.warning(f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join([["tushare", "akshare", "baostock"]])})都没有{period}数据: {symbol}，降级到其他数据源")
+            logger.warning(f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join(['tushare', 'akshare', 'baostock'])})都没有{period}数据: {symbol}，降级到其他数据源")
             return None
 
         except Exception as e:

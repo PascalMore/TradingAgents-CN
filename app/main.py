@@ -382,7 +382,7 @@ async def lifespan(app: FastAPI):
             run_tushare_historical_sync,
             CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
             id="tushare_historical_sync",
-            name="历史数据同步（Tushare）",
+            name="历史股票数据同步（Tushare）",
             kwargs={"incremental": True}
         )
         if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_HISTORICAL_SYNC_ENABLED):
