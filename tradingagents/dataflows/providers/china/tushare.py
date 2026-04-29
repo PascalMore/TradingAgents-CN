@@ -1356,7 +1356,8 @@ class TushareProvider(BaseStockDataProvider):
                     "ts_code": ts_code,
                     "financial_indicators": indicators,
                     "data_source": "tushare",
-                    "updated_at": datetime.utcnow()
+                    "updated_at": datetime.utcnow(),
+                    "created_at": datetime.utcnow()
                 }
 
             return None
@@ -1477,6 +1478,7 @@ class TushareProvider(BaseStockDataProvider):
             # 元数据
             "data_source": "tushare",
             "data_version": 1,
+            "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
 
@@ -1595,11 +1597,42 @@ class TushareProvider(BaseStockDataProvider):
             标准化后的财务数据
         """
         try:
+            # ── Tushare API 返回的 DataFrame 可能包含完全重复的行（同一 end_date 多条记录）──
+            # 按 end_date 去重，保留第一条
+            LIST_KEYS = ['income_statement', 'balance_sheet', 'cashflow_statement',
+                         'financial_indicators', 'main_business']
+            for key in LIST_KEYS:
+                if key in financial_data and isinstance(financial_data[key], list):
+                    seen = set()
+                    deduped = []
+                    for item in financial_data[key]:
+                        if isinstance(item, dict) and 'end_date' in item:
+                            ed = item['end_date']
+                            if ed not in seen:
+                                seen.add(ed)
+                                deduped.append(item)
+                        else:
+                            deduped.append(item)
+                    financial_data[key] = deduped
+
             # 获取最新的数据记录（第一条记录通常是最新的）
+            # ⚠️ 注意：各表的数据时间可能不同步，需要按 report_period 精确匹配
             latest_income = financial_data.get('income_statement', [{}])[0] if financial_data.get('income_statement') else {}
             latest_balance = financial_data.get('balance_sheet', [{}])[0] if financial_data.get('balance_sheet') else {}
             latest_cashflow = financial_data.get('cashflow_statement', [{}])[0] if financial_data.get('cashflow_statement') else {}
-            latest_indicator = financial_data.get('financial_indicators', [{}])[0] if financial_data.get('financial_indicators') else {}
+            
+            # 以 income 的最新一期为基准，确定 report_period
+            report_period = latest_income.get('end_date') or latest_balance.get('end_date') or latest_cashflow.get('end_date')
+            
+            # 找到和 report_period 精确匹配的财务指标记录（因为 indicator 最新可能和 income 不同步）
+            def find_by_end_date(data_list, target_period):
+                for item in data_list:
+                    if item.get('end_date') == target_period:
+                        return item
+                return None
+            
+            financial_indicators_list = financial_data.get('financial_indicators', [])
+            latest_indicator = find_by_end_date(financial_indicators_list, report_period) or financial_indicators_list[0] if financial_indicators_list else {}
 
             # 提取基础信息
             symbol = ts_code.split('.')[0] if '.' in ts_code else ts_code
@@ -1619,6 +1652,11 @@ class TushareProvider(BaseStockDataProvider):
                 "ann_date": ann_date,
                 "report_type": self._determine_report_type(report_period),
 
+                # 补充字段：从 ts_code 推导 code、full_symbol、market
+                "code": symbol,
+                "full_symbol": ts_code,
+                "market": self._infer_market_from_ts_code(ts_code),
+
                 # 利润表核心指标
                 "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（单期）
                 "revenue_ttm": revenue_ttm,  # 营业收入（TTM）
@@ -1626,7 +1664,7 @@ class TushareProvider(BaseStockDataProvider):
                 "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（单期）
                 "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（单期）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
-                "oper_profit": self._safe_float(latest_income.get('oper_profit')),  # 营业利润
+                "oper_profit": self._safe_float(latest_income.get('operate_profit')),  # 营业利润 (Tushare字段: operate_profit)
                 "total_profit": self._safe_float(latest_income.get('total_profit')),  # 利润总额
                 "oper_cost": self._safe_float(latest_income.get('oper_cost')),  # 营业成本
                 "oper_exp": self._safe_float(latest_income.get('oper_exp')),  # 营业费用
@@ -1688,6 +1726,7 @@ class TushareProvider(BaseStockDataProvider):
 
                 # 元数据
                 "data_source": "tushare",
+                "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
 
@@ -1698,6 +1737,7 @@ class TushareProvider(BaseStockDataProvider):
             return {
                 "symbol": ts_code.split('.')[0] if '.' in ts_code else ts_code,
                 "data_source": "tushare",
+                "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
                 "error": str(e)
             }
@@ -1803,6 +1843,19 @@ class TushareProvider(BaseStockDataProvider):
         except Exception as e:
             self.logger.warning(f"❌ TTM计算异常: {e}")
             return None
+
+    def _infer_market_from_ts_code(self, ts_code: str) -> str:
+        """从 ts_code 推断市场代码"""
+        if not ts_code or '.' not in ts_code:
+            return 'CN'
+        suffix = ts_code.split('.')[-1].upper()
+        if suffix in ('SH', 'SZ', 'BJ'):
+            return 'CN'
+        elif suffix == 'HK':
+            return 'HK'
+        elif suffix in ('US', 'N', 'O'):
+            return 'US'
+        return 'CN'
 
     def _determine_report_type(self, report_period: str) -> str:
         """根据报告期确定报告类型"""

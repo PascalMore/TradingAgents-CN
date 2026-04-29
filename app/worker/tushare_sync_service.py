@@ -1242,48 +1242,28 @@ class TushareSyncService:
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
 
-            # 🔥 批量查询本地 raw_data 最新报告期
-            # 对于每只股票，获取其 raw_data.income_statement 中的最新 end_date
+            # 🔥 批量查询本地最新报告期（直接用外层 report_period 字段，性能更好）
             local_latest_dates = {}
             if symbols:
                 batch_size = 500
                 for batch_start in range(0, len(symbols), batch_size):
                     batch_symbols = symbols[batch_start:batch_start + batch_size]
                     
-                    # 使用 aggregation 来提取 raw_data.income_statement 中的最新 end_date
-                    pipeline = [
+                    # 优化：直接查询外层 report_period 字段，不需要解析嵌套数组
+                    cursor = self.db.stock_financial_data.find(
                         {
-                            "$match": {
-                                "symbol": {"$in": batch_symbols},
-                                "data_source": "tushare",
-                                "raw_data.income_statement": {"$exists": True}
-                            }
+                            "symbol": {"$in": batch_symbols},
+                            "data_source": "tushare"
                         },
-                        {
-                            "$project": {
-                                "symbol": 1,
-                                "latest_end_date": {
-                                    "$let": {
-                                        "vars": {
-                                            "income_list": {"$ifNull": ["$raw_data.income_statement", []]}
-                                        },
-                                        "in": {
-                                            "$max": "$$income_list.end_date"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    ]
-                    
-                    cursor = self.db.stock_financial_data.aggregate(pipeline)
+                        {"symbol": 1, "report_period": 1}
+                    )
                     async for doc in cursor:
                         sym = doc.get("symbol")
-                        latest_date = doc.get("latest_end_date")
-                        if sym and latest_date:
-                            # 取最大的日期（因为可能有多条记录）
-                            if sym not in local_latest_dates or latest_date > local_latest_dates[sym]:
-                                local_latest_dates[sym] = latest_date
+                        period = doc.get("report_period")
+                        if sym and period:
+                            # 取最新的报告期
+                            if sym not in local_latest_dates or period > local_latest_dates[sym]:
+                                local_latest_dates[sym] = period
 
             logger.info(f"📊 批量查询完成: {len(local_latest_dates)} 只股票已有本地财务数据")
 
@@ -1313,14 +1293,21 @@ class TushareSyncService:
                     )
 
                     if financial_data:
-                        # 保存财务数据
-                        success = await self._save_financial_data(symbol, financial_data)
-                        if success:
-                            stats["success_count"] += 1
+                        # 🔥 检查是否有新数据（避免重复写入）
+                        returned_period = financial_data.get('report_period')
+                        if local_latest_end_date and returned_period and returned_period <= local_latest_end_date:
+                            # 返回的报告期不比本地新，跳过保存
+                            stats["skipped_count"] += 1
+                            logger.debug(f"⚠️ {symbol}: 无新数据 (返回{returned_period} <= 本地{local_latest_end_date})")
                         else:
-                            stats["error_count"] += 1
+                            # 有新数据，保存财务数据
+                            success = await self._save_financial_data(symbol, financial_data)
+                            if success:
+                                stats["success_count"] += 1
+                            else:
+                                stats["error_count"] += 1
                     else:
-                        # 没有新数据，检查是否因为已达上限
+                        # 没有新数据
                         stats["skipped_count"] += 1
                         logger.debug(f"⚠️ {symbol}: 无新财务数据 (start_date={start_date})")
 

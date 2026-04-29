@@ -418,14 +418,17 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"💰 Tushare财务数据同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
 
-        # 历史财务数据补全任务（每周日 04:00）
-        scheduler.add_job(
-            run_tushare_historical_financial_sync,
-            CronTrigger.from_crontab("0 4 * * 0", timezone=settings.TIMEZONE),
-            id="tushare_historical_financial_sync",
-            name="历史财务数据补全（Tushare）"
-        )
-        logger.info(f"📋 Tushare历史财务数据补全已配置: 0 4 * * 0 (每周日 04:00)")
+        # 历史财务数据补全任务（每周日 04:00）- 已完成全量回补，禁用
+        if settings.TUSHARE_HISTORICAL_FINANCIAL_SYNC_ENABLED:
+            scheduler.add_job(
+                run_tushare_historical_financial_sync,
+                CronTrigger.from_crontab("0 4 * * 0", timezone=settings.TIMEZONE),
+                id="tushare_historical_financial_sync",
+                name="历史财务数据补全（Tushare）"
+            )
+            logger.info(f"📋 Tushare历史财务数据补全已配置: 0 4 * * 0 (每周日 04:00)")
+        else:
+            logger.info("⏸️ Tushare历史财务数据补全已禁用")
 
         # 状态检查任务
         scheduler.add_job(
