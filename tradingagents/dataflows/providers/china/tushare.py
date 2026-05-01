@@ -1353,6 +1353,7 @@ class TushareProvider(BaseStockDataProvider):
 
                 return {
                     "symbol": symbol,
+                    "ts_code": ts_code,
                     "financial_indicators": indicators,
                     "data_source": "tushare",
                     "updated_at": datetime.utcnow(),
