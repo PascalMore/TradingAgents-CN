@@ -1662,7 +1662,6 @@ class TushareProvider(BaseStockDataProvider):
                 # 利润表核心指标
                 "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（单期）
                 "revenue_ttm": revenue_ttm,  # 营业收入（TTM）
-                "oper_rev": self._safe_float(latest_income.get('oper_rev')),  # 营业收入
                 "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（单期）
                 "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（单期）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
@@ -1690,7 +1689,7 @@ class TushareProvider(BaseStockDataProvider):
                 # 现金流量表核心指标
                 "n_cashflow_act": self._safe_float(latest_cashflow.get('n_cashflow_act')),  # 经营活动现金流
                 "n_cashflow_inv_act": self._safe_float(latest_cashflow.get('n_cashflow_inv_act')),  # 投资活动现金流
-                "n_cashflow_fin_act": self._safe_float(latest_cashflow.get('n_cashflow_fin_act')),  # 筹资活动现金流
+                "n_cashflow_fin_act": self._safe_float(latest_cashflow.get('n_cash_flows_fnc_act')),  # 筹资活动现金流
                 "c_cash_equ_end_period": self._safe_float(latest_cashflow.get('c_cash_equ_end_period')),  # 期末现金
                 "c_cash_equ_beg_period": self._safe_float(latest_cashflow.get('c_cash_equ_beg_period')),  # 期初现金
 
@@ -1699,7 +1698,7 @@ class TushareProvider(BaseStockDataProvider):
                 "roa": self._safe_float(latest_indicator.get('roa')),  # 总资产收益率
                 "roe_waa": self._safe_float(latest_indicator.get('roe_waa')),  # 加权平均净资产收益率
                 "roe_dt": self._safe_float(latest_indicator.get('roe_dt')),  # 净资产收益率(扣除非经常损益)
-                "roa2": self._safe_float(latest_indicator.get('roa2')),  # 总资产收益率(扣除非经常损益)
+                "roa2": self._safe_float(latest_indicator.get('roa_yearly')),  # 总资产收益率(扣除非经常损益)
                 "gross_margin": self._safe_float(latest_indicator.get('grossprofit_margin')),  # 🔥 修复：使用 grossprofit_margin（销售毛利率%）而不是 gross_margin（毛利绝对值）
                 "netprofit_margin": self._safe_float(latest_indicator.get('netprofit_margin')),  # 销售净利率
                 "cogs_of_sales": self._safe_float(latest_indicator.get('cogs_of_sales')),  # 销售成本率
