@@ -1717,12 +1717,13 @@ class TushareProvider(BaseStockDataProvider):
                 "cash_ratio": self._safe_float(latest_indicator.get('cash_ratio')),  # 现金比率
 
                 # 原始数据保留（用于详细分析）
+                # 先规范化数据：将 NaN 替换为 None，统一空值表示
                 "raw_data": {
-                    "income_statement": financial_data.get('income_statement', []),
-                    "balance_sheet": financial_data.get('balance_sheet', []),
-                    "cashflow_statement": financial_data.get('cashflow_statement', []),
-                    "financial_indicators": financial_data.get('financial_indicators', []),
-                    "main_business": financial_data.get('main_business', [])
+                    "income_statement": self._normalize_raw_data(financial_data).get('income_statement', []),
+                    "balance_sheet": self._normalize_raw_data(financial_data).get('balance_sheet', []),
+                    "cashflow_statement": self._normalize_raw_data(financial_data).get('cashflow_statement', []),
+                    "financial_indicators": self._normalize_raw_data(financial_data).get('financial_indicators', []),
+                    "main_business": self._normalize_raw_data(financial_data).get('main_business', [])
                 },
 
                 # 元数据
@@ -1899,6 +1900,48 @@ class TushareProvider(BaseStockDataProvider):
 
         except (ValueError, TypeError, AttributeError):
             return None
+
+    def _normalize_raw_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        规范化原始数据记录：将 NaN 替换为 None，统一空值表示
+        
+        规范：
+        - 数值字段：NaN -> None
+        - None 保持 None
+        - 空字符串 -> None
+        - 字符串字段保持原样（除非为空字符串）
+        """
+        import math
+        normalized = {}
+        for key, value in record.items():
+            if value is None:
+                normalized[key] = None
+            elif isinstance(value, float) and math.isnan(value):
+                normalized[key] = None
+            elif isinstance(value, str):
+                if value.strip() == '':
+                    normalized[key] = None
+                else:
+                    normalized[key] = value
+            else:
+                normalized[key] = value
+        return normalized
+
+    def _normalize_raw_data(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        规范化财务数据中的所有原始记录
+        """
+        LIST_KEYS = ['income_statement', 'balance_sheet', 'cashflow_statement',
+                     'financial_indicators', 'main_business']
+        
+        for key in LIST_KEYS:
+            if key in financial_data and isinstance(financial_data[key], list):
+                financial_data[key] = [
+                    self._normalize_raw_record(item) 
+                    for item in financial_data[key]
+                ]
+        
+        return financial_data
 
     def _calculate_gross_profit(self, revenue, oper_cost) -> Optional[float]:
         """安全计算毛利润"""
