@@ -1353,7 +1353,6 @@ class TushareProvider(BaseStockDataProvider):
 
                 return {
                     "symbol": symbol,
-                    "ts_code": ts_code,
                     "financial_indicators": indicators,
                     "data_source": "tushare",
                     "updated_at": datetime.utcnow(),
@@ -1649,7 +1648,6 @@ class TushareProvider(BaseStockDataProvider):
             standardized_data = {
                 # 基础信息
                 "symbol": symbol,
-                "ts_code": ts_code,
                 "report_period": report_period,
                 "ann_date": ann_date,
                 "report_type": self._determine_report_type(report_period),
