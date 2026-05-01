@@ -1636,8 +1636,10 @@ class TushareProvider(BaseStockDataProvider):
 
             # 提取基础信息
             symbol = ts_code.split('.')[0] if '.' in ts_code else ts_code
-            report_period = latest_income.get('end_date') or latest_balance.get('end_date') or latest_cashflow.get('end_date')
-            ann_date = latest_income.get('ann_date') or latest_balance.get('ann_date') or latest_cashflow.get('ann_date')
+            # ⚠️ report_period 必须严格从 income 表的 end_date 获取，不允许 fallback 到 balance/cashflow
+            # 因为各表发布时间不同（如 Q1 资产负债表可能比利润表先发布），fallback 会导致数据不一致
+            report_period = latest_income.get('end_date') if latest_income else None
+            ann_date = latest_income.get('ann_date') if latest_income else None
 
             # 计算 TTM 数据
             income_statements = financial_data.get('income_statement', [])

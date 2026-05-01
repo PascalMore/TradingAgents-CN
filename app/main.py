@@ -68,6 +68,9 @@ from app.worker.baostock_sync_service import (
 # from app.worker.us_sync_service import ...
 from app.middleware.operation_log_middleware import OperationLogMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.executors.asyncio import AsyncIOExecutor
+
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
@@ -277,7 +280,18 @@ async def lifespan(app: FastAPI):
     except Exception:
         croniter = None  # 可选依赖
     try:
-        scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+        scheduler = AsyncIOScheduler(
+            timezone=settings.TIMEZONE,
+            jobstores={'default': MemoryJobStore()},
+            job_defaults={
+                'coalesce': False,
+                'max_instances': 5,
+                'misfire_grace_time': 60,
+            },
+            executors={
+                'default': AsyncIOExecutor(),
+            },
+        )
 
         # 使用多数据源同步服务（支持自动切换）
         multi_source_service = MultiSourceBasicsSyncService()

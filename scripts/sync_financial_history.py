@@ -161,10 +161,12 @@ class FinancialHistorySyncer:
                 return False
 
             # 构建查询条件
+            # ⚠️ 用 {symbol, data_source} 作为 upsert key（不加 report_period），
+            #    这样每只股票只有一条记录，raw_data 累积所有历史 period
+            data_source_val = data.get('data_source', 'tushare')
             filter_doc = {
                 'symbol': data.get('symbol'),
-                'report_period': data.get('report_period'),
-                'data_source': data.get('data_source', 'tushare')
+                'data_source': data_source_val
             }
 
             existing = self.col.find_one(filter_doc)

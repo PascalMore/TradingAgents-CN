@@ -43,12 +43,17 @@ class FinancialDataService:
             collection = self.db[self.collection_name]
             logger.info("📊 检查并创建财务数据索引...")
 
-            # 1. 复合唯一索引：股票代码+报告期+数据源（用于 upsert）
+            # 1. 复合唯一索引：股票代码+数据源（每只股票只有一条记录，最新报告期在外层）
+            # 先尝试删除旧索引（兼容旧版本遗留）
+            try:
+                await collection.drop_index('symbol_1_report_period_1_data_source_1')
+                logger.info('✅ 删除遗留旧索引 symbol_1_report_period_1_data_source_1')
+            except:
+                pass
             await collection.create_index([
                 ("symbol", 1),
-                ("report_period", 1),
                 ("data_source", 1)
-            ], unique=True, name="symbol_period_source_unique", background=True)
+            ], unique=True, name='symbol_source_unique', background=True)
 
             # 2. 股票代码索引（查询单只股票的财务数据）
             await collection.create_index([("symbol", 1)], name="symbol_index", background=True)
@@ -120,10 +125,10 @@ class FinancialDataService:
         merged['updated_at'] = datetime.now(timezone.utc)
         merged['version'] = merged.get('version', 0) + 1
 
-        # 🔥 同步外层 report_period：使用 raw_data 中的最新 end_date
+        # 🔥 同步外层 report_period：始终与 raw_data 中的最新 end_date 保持一致
         if latest_end_date:
             current_report_period = merged.get('report_period', '')
-            if not current_report_period or latest_end_date > current_report_period:
+            if not current_report_period or latest_end_date != current_report_period:
                 merged['report_period'] = latest_end_date
                 logger.debug(f"📊 同步外层 report_period: {current_report_period} -> {latest_end_date}")
 
@@ -155,12 +160,14 @@ class FinancialDataService:
                 existing_dedup = [v[0] for v in existing_dedup_map.values()]
                 existing_periods = set(existing_dedup_map.keys())
 
-                # Step 2: 对 new_items 去重（按 end_date 去重，保留 update_flag 最高的版本）
+                # Step 2: 对 new_items 去重（按 end_date 去重，保留 update_flag 最高的版本），并移除 ts_code
                 new_dedup_map = {}
                 for item in value:
                     if isinstance(item, dict) and 'end_date' in item:
                         end_date = item['end_date']
                         update_flag = item.get('update_flag', 0) or 0
+                        # 移除 ts_code（已有 full_symbol）
+                        item = {k: v for k, v in item.items() if k != 'ts_code'}
                         if end_date not in new_dedup_map or update_flag > new_dedup_map[end_date][1]:
                             new_dedup_map[end_date] = (item, update_flag)
 
@@ -225,11 +232,12 @@ class FinancialDataService:
             saved_count = 0
             
             # 如果是多期数据，分别处理每期
+            # ⚠️ filter_doc 只用 symbol + data_source（不加 report_period），
+            #    这样每次保存都更新同一只股票，外层 report_period 由 _merge_raw_data 自动同步为最新
             if isinstance(standardized_data, list):
                 for data_item in standardized_data:
                     filter_doc = {
                         "symbol": data_item["symbol"],
-                        "report_period": data_item["report_period"],
                         "data_source": data_item["data_source"]
                     }
                     
@@ -247,7 +255,6 @@ class FinancialDataService:
                 # 单期数据
                 filter_doc = {
                     "symbol": standardized_data["symbol"],
-                    "report_period": standardized_data["report_period"],
                     "data_source": standardized_data["data_source"]
                 }
                 
