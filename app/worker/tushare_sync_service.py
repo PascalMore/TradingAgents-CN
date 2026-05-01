@@ -1272,15 +1272,17 @@ class TushareSyncService:
                     # 🔥 获取本地最新报告期
                     local_latest_end_date = local_latest_dates.get(symbol)
                     
-                    # 确定增量起始日期
+                    # 确定增量起始日期和 limit
                     if local_latest_end_date:
-                        # 有本地数据，从本地最新日期的下一天开始
+                        # 有本地数据，从本地最新日期的下一天开始，limit 用增量（20期约5年）
                         start_date = self._increment_date(local_latest_end_date)
-                        logger.debug(f"📅 {symbol}: 本地已有数据，增量从 {start_date} 开始 (本地最新: {local_latest_end_date})")
+                        sync_limit = limit  # 默认增量 limit
+                        logger.debug(f"📅 {symbol}: 本地已有数据，增量从 {start_date} 开始 (本地最新: {local_latest_end_date})，limit={sync_limit}")
                     else:
-                        # 没有本地数据，从19900101开始全量获取
+                        # 没有本地数据，从19900101开始全量获取，limit 用 500（覆盖全部历史）
                         start_date = "19900101"
-                        logger.debug(f"📅 {symbol}: 本地无数据，全量从 {start_date} 开始")
+                        sync_limit = 500  # 全量拉取，不丢失历史
+                        logger.debug(f"📅 {symbol}: 本地无数据，全量从 {start_date} 开始，limit={sync_limit}")
 
                     # 速率限制
                     await self.rate_limiter.acquire()
@@ -1289,7 +1291,7 @@ class TushareSyncService:
                     financial_data = await self.provider.get_financial_data(
                         symbol, 
                         start_date=start_date,  # 增量起始日期
-                        limit=limit              # 限制获取期数
+                        limit=sync_limit        # 首次全量用500，增量用默认20
                     )
 
                     if financial_data:
