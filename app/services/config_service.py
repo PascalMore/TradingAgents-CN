@@ -4625,6 +4625,10 @@ class ConfigService:
                 # 智谱AI使用 glm-4 模型进行测试
                 test_model = "glm-4"
                 logger.info(f"🔍 智谱AI使用测试模型: {test_model}")
+            elif provider_name == "minimax":
+                # MiniMax 使用正确的模型名
+                test_model = "MiniMax-M2.7"
+                logger.info(f"🔍 MiniMax使用测试模型: {test_model}")
 
             # 使用一个通用的模型名称进行测试
             # 聚合渠道通常支持多种模型，这里使用 gpt-3.5-turbo 作为测试

@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, stock_pool
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -50,6 +50,8 @@ from app.worker.tushare_sync_service import (
     run_tushare_historical_financial_sync,
     run_tushare_status_check
 )
+from app.services.stock_sector_info_service import run_stock_sector_info_sync
+from app.services.sw_index_daily_service import run_sw_index_daily_sync
 from app.worker.akshare_sync_service import (
     run_akshare_basic_info_sync,
     run_akshare_quotes_sync,
@@ -75,6 +77,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router
+from app.api.routes import stock_sector_info as stock_sector_info_router
+from app.api.routes import sw_index_daily as sw_index_daily_router
 
 
 def get_version() -> str:
@@ -378,6 +382,30 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ Tushare指数信息同步已添加但暂停: {settings.TUSHARE_INDEX_INFO_SYNC_CRON}")
         else:
             logger.info(f"📅 Tushare指数信息同步已配置: {settings.TUSHARE_INDEX_INFO_SYNC_CRON}")
+
+        # 股票行业分类映射同步任务
+        scheduler.add_job(
+            run_stock_sector_info_sync,
+            CronTrigger.from_crontab("30 23 * * 0", timezone=settings.TIMEZONE),
+            id="stock_sector_info_sync",
+            name="股票行业分类同步（Tushare）",
+            kwargs={"classify_system": "SW"}
+        )
+        if not settings.TUSHARE_UNIFIED_ENABLED:
+            scheduler.pause_job("stock_sector_info_sync")
+            logger.info("⏸️ 股票行业分类同步已添加但暂停: 10 2 * * *")
+        else:
+            logger.info("📅 股票行业分类同步已配置: 10 2 * * *")
+
+        # 申万一级行业指数历史日线同步任务
+        scheduler.add_job(
+            run_sw_index_daily_sync,
+            CronTrigger.from_crontab("30 18 * * *", timezone=settings.TIMEZONE),
+            id="sw_index_daily_sync",
+            name="历史行业指数数据同步（AKShare）",
+            kwargs={"force_full": False},
+        )
+        logger.info("📅 申万行业指数日线同步已配置: 30 18 * * *")
 
         # 实时行情同步任务
         scheduler.add_job(
@@ -775,6 +803,9 @@ app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
 app.include_router(sync_router.router)
 app.include_router(multi_source_sync.router)
 app.include_router(paper_router.router, prefix="/api", tags=["paper"])
+app.include_router(stock_pool.router, tags=["portfolio-stock-pool"])
+app.include_router(stock_sector_info_router.router)
+app.include_router(sw_index_daily_router.router)
 app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
 app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
 app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])

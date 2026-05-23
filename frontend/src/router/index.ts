@@ -115,6 +115,37 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/portfolio',
+    name: 'Portfolio',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '组合管理',
+      icon: 'Briefcase',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'PortfolioHome',
+        component: () => import('@/views/Portfolio/index.vue'),
+        meta: {
+          title: '组合管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'stock-pool',
+        name: 'PortfolioStockPool',
+        component: () => import('@/views/Portfolio/StockPool.vue'),
+        meta: {
+          title: '股票池',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/learning',
     name: 'Learning',
     component: () => import('@/layouts/BasicLayout.vue'),

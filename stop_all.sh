@@ -27,6 +27,14 @@ fi
 
 # 清理残留进程
 pkill -f "python.*app.main" 2>/dev/null && echo "🧹 清理后端残留进程"
-pkill -f "python.*start_web" 2>/dev/null && echo "🧹 清理前端残留进程"
+pkill -f "vite" 2>/dev/null && echo "🧹 清理 Vite 前端残留进程"
+
+# 按端口清理前端（备用方案）
+for port in 3000 3001 3002 3003 3004 5173; do
+    pid=$(lsof -ti :$port 2>/dev/null)
+    if [ -n "$pid" ]; then
+        kill $pid 2>/dev/null && echo "🧹 清理端口 $port 残留进程 (PID: $pid)"
+    fi
+done
 
 echo "🎉 停止完成"

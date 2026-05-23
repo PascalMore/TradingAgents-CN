@@ -11,11 +11,6 @@
       <template #title>仪表板</template>
     </el-menu-item>
 
-    <el-menu-item index="/learning">
-      <el-icon><Reading /></el-icon>
-      <template #title>学习中心</template>
-    </el-menu-item>
-
     <el-sub-menu index="/analysis">
       <template #title>
         <el-icon><TrendCharts /></el-icon>
@@ -25,6 +20,14 @@
       <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
       <!-- 新增：将分析报告作为股票分析的子菜单 -->
       <el-menu-item index="/reports">分析报告</el-menu-item>
+    </el-sub-menu>
+
+    <el-sub-menu index="/portfolio">
+      <template #title>
+        <el-icon><Briefcase /></el-icon>
+        <span>组合管理</span>
+      </template>
+      <el-menu-item index="/portfolio/stock-pool">股票池</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks">
@@ -47,6 +50,10 @@
       <template #title>模拟交易</template>
     </el-menu-item>
 
+    <el-menu-item index="/learning">
+      <el-icon><Reading /></el-icon>
+      <template #title>学习中心</template>
+    </el-menu-item>
 
     <!-- 分析报告已移至“股票分析”子菜单，保留注释便于追踪 -->
     <!--
@@ -109,6 +116,7 @@ import {
   Search,
   Star,
   List,
+  Briefcase,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,
