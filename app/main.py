@@ -400,7 +400,7 @@ async def lifespan(app: FastAPI):
         # 申万一级行业指数历史日线同步任务
         scheduler.add_job(
             run_sw_index_daily_sync,
-            CronTrigger.from_crontab("30 18 * * *", timezone=settings.TIMEZONE),
+            CronTrigger.from_crontab("30 19 * * *", timezone=settings.TIMEZONE),
             id="sw_index_daily_sync",
             name="历史行业指数数据同步（AKShare）",
             kwargs={"force_full": False},
