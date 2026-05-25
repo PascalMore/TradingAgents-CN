@@ -842,13 +842,11 @@ class SchedulerService:
 
             # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
             if status in ["success", "failed"]:
-                # 查找最近的 running 记录（5分钟内）
-                five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+                # 查找该 job_id 下任意未更新的 running 记录（不限时间，避免长任务找不到自己的 running 记录）
                 existing_record = await db.scheduler_executions.find_one(
                     {
                         "job_id": job_id,
-                        "status": "running",
-                        "timestamp": {"$gte": five_minutes_ago}
+                        "status": "running"
                     },
                     sort=[("timestamp", -1)]
                 )
