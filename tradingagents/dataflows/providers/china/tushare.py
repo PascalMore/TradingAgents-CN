@@ -989,6 +989,35 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取Tushare财务数据失败 symbol={symbol}: {e}")
             return None
 
+    async def get_financial_ann_date(self, symbol: str) -> Optional[str]:
+        """
+        轻量方法：只获取某股票 Tushare 最新一条财务指标的公告日期（ann_date）
+        用于判断是否需要调用完整 4 表 API
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            ann_date (YYYYMMDD 格式)，失败或无数据返回 None
+        """
+        if not self.is_available():
+            return None
+        try:
+            ts_code = self._normalize_ts_code(symbol)
+            df = await asyncio.to_thread(
+                self.api.fina_indicator,
+                ts_code=ts_code,
+                limit=1,
+                fields='ts_code,ann_date,end_date'
+            )
+            if df is not None and not df.empty:
+                ann_date = df.iloc[0].get('ann_date')
+                self.logger.debug(f"📅 {ts_code} 最新 ann_date: {ann_date}")
+                return str(ann_date) if ann_date else None
+        except Exception as e:
+            self.logger.debug(f"⚠️ 获取 {symbol} ann_date 失败: {e}")
+        return None
+
     async def get_stock_news(self, symbol: str = None, limit: int = 10,
                            hours_back: int = 24, src: str = None) -> Optional[List[Dict[str, Any]]]:
         """

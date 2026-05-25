@@ -1242,114 +1242,127 @@ class TushareSyncService:
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
 
-            # 🔥 批量查询本地最新报告期（直接用外层 report_period 字段，性能更好）
-            local_latest_dates = {}
+            # 🔥 批量查询本地最新公告日期（ann_date），用于判断是否需要更新
+            local_latest_ann_dates = {}
             if symbols:
                 batch_size = 500
                 for batch_start in range(0, len(symbols), batch_size):
                     batch_symbols = symbols[batch_start:batch_start + batch_size]
                     
-                    # 优化：直接查询外层 report_period 字段，不需要解析嵌套数组
+                    # 查询外层 ann_date 字段，判断本地已有的最新公告日期
                     cursor = self.db.stock_financial_data.find(
                         {
                             "symbol": {"$in": batch_symbols},
-                            "data_source": "tushare"
+                            "data_source": "tushare",
+                            "ann_date": {"$exists": True}
                         },
-                        {"symbol": 1, "report_period": 1}
+                        {"symbol": 1, "ann_date": 1}
                     )
                     async for doc in cursor:
                         sym = doc.get("symbol")
-                        period = doc.get("report_period")
-                        if sym and period:
-                            # 取最新的报告期
-                            if sym not in local_latest_dates or period > local_latest_dates[sym]:
-                                local_latest_dates[sym] = period
+                        ann_date = doc.get("ann_date")
+                        if sym and ann_date:
+                            # 取最新的公告日期
+                            if sym not in local_latest_ann_dates or ann_date > local_latest_ann_dates[sym]:
+                                local_latest_ann_dates[sym] = ann_date
 
-            logger.info(f"📊 批量查询完成: {len(local_latest_dates)} 只股票已有本地财务数据")
+            logger.info(f"📊 批量查询完成: {len(local_latest_ann_dates)} 只股票已有本地财务数据")
 
-            for i, symbol in enumerate(symbols):
-                try:
-                    # 🔥 获取本地最新报告期
-                    local_latest_end_date = local_latest_dates.get(symbol)
-                    
-                    # 确定增量起始日期和 limit
-                    if local_latest_end_date:
-                        # 有本地数据，从本地最新日期的下一天开始，limit 用增量（20期约5年）
-                        start_date = self._increment_date(local_latest_end_date)
-                        sync_limit = limit  # 默认增量 limit
-                        logger.debug(f"📅 {symbol}: 本地已有数据，增量从 {start_date} 开始 (本地最新: {local_latest_end_date})，limit={sync_limit}")
-                    else:
-                        # 没有本地数据，从19900101开始全量获取，limit 用 500（覆盖全部历史）
-                        start_date = "19900101"
-                        sync_limit = 500  # 全量拉取，不丢失历史
-                        logger.debug(f"📅 {symbol}: 本地无数据，全量从 {start_date} 开始，limit={sync_limit}")
+            # ========== 阶段一：轻量探路（ann_date 探测，并发度 10）==========
+            logger.info(f"📡 阶段一：开始轻量探路，共 {len(symbols)} 只股票，并发度 3")
+            tushare_ann_dates = {}
+            probe_semaphore = asyncio.Semaphore(3)
 
-                    # 速率限制
+            async def probe_one(symbol: str) -> tuple:
+                async with probe_semaphore:
                     await self.rate_limiter.acquire()
+                    ann_date = await self.provider.get_financial_ann_date(symbol)
+                    return symbol, ann_date
 
-                    # 🔥 调用 provider 获取财务数据，传入 start_date 参数
-                    financial_data = await self.provider.get_financial_data(
-                        symbol, 
-                        start_date=start_date,  # 增量起始日期
-                        limit=sync_limit        # 首次全量用500，增量用默认20
-                    )
+            probe_tasks = [probe_one(s) for s in symbols]
+            probe_results = await asyncio.gather(*probe_tasks, return_exceptions=True)
 
-                    if financial_data:
-                        # 🔥 检查是否有新数据（避免重复写入）
-                        returned_period = financial_data.get('report_period')
-                        if local_latest_end_date and returned_period and returned_period <= local_latest_end_date:
-                            # 返回的报告期不比本地新，跳过保存
+            for result in probe_results:
+                if isinstance(result, Exception):
+                    # 探路异常：该股票视为需要完整更新（不放过）
+                    logger.warning(f"⚠️ 探路异常: {result}, 标记为需完整更新")
+                    continue
+                symbol, ann_date = result
+                tushare_ann_dates[symbol] = ann_date
+
+            logger.info(f"📡 阶段一完成：探路结果数量 {len(tushare_ann_dates)}")
+
+            # ========== 阶段二：精准完整更新 ==========
+            logger.info(f"📊 阶段二：开始精准更新（并发度 3）")
+            update_semaphore = asyncio.Semaphore(3)
+            processed_count = 0
+            need_full_sync_count = 0
+
+            async def update_one(symbol: str) -> None:
+                nonlocal processed_count, need_full_sync_count
+                async with update_semaphore:
+                    try:
+                        local_ann = local_latest_ann_dates.get(symbol)
+                        tushare_ann = tushare_ann_dates.get(symbol)
+
+                        # 判断是否需要调用完整 4 表：本地无数据 或 Tushare ann_date 更新
+                        need_full = (
+                            local_ann is None
+                            or (tushare_ann is not None and tushare_ann > local_ann)
+                        )
+
+                        if not need_full:
                             stats["skipped_count"] += 1
-                            logger.debug(f"⚠️ {symbol}: 无新数据 (返回{returned_period} <= 本地{local_latest_end_date})")
+                            processed_count += 1
+                            return
+
+                        need_full_sync_count += 1
+
+                        # 确定增量起始日期和 limit
+                        if local_ann:
+                            start_date = self._increment_date(local_ann)
+                            sync_limit = limit
                         else:
-                            # 有新数据，保存财务数据
-                            success = await self._save_financial_data(symbol, financial_data)
-                            if success:
-                                stats["success_count"] += 1
+                            start_date = "19900101"
+                            sync_limit = 500
+
+                        await self.rate_limiter.acquire()
+                        financial_data = await self.provider.get_financial_data(
+                            symbol,
+                            start_date=start_date,
+                            limit=sync_limit
+                        )
+
+                        if financial_data:
+                            returned_ann_date = financial_data.get('ann_date')
+                            if local_ann and returned_ann_date and returned_ann_date <= local_ann:
+                                stats["skipped_count"] += 1
                             else:
-                                stats["error_count"] += 1
-                    else:
-                        # 没有新数据
-                        stats["skipped_count"] += 1
-                        logger.debug(f"⚠️ {symbol}: 无新财务数据 (start_date={start_date})")
+                                success = await self._save_financial_data(symbol, financial_data)
+                                if success:
+                                    stats["success_count"] += 1
+                                else:
+                                    stats["error_count"] += 1
+                        else:
+                            stats["skipped_count"] += 1
 
-                    # 进度日志和进度跟踪
-                    if (i + 1) % 20 == 0:
-                        progress = int((i + 1) / len(symbols) * 100)
-                        logger.info(f"📈 财务数据同步进度: {i + 1}/{len(symbols)} ({progress}%) "
-                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']}, 无新数据: {stats['skipped_count']})")
-                        # 输出速率限制器统计
-                        limiter_stats = self.rate_limiter.get_stats()
-                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次")
+                        processed_count += 1
 
-                        # 更新任务进度
-                        if job_id:
-                            from app.services.scheduler_service import update_job_progress, TaskCancelledException
-                            try:
-                                await update_job_progress(
-                                    job_id=job_id,
-                                    progress=progress,
-                                    message=f"正在同步 {symbol} 财务数据",
-                                    current_item=symbol,
-                                    total_items=len(symbols),
-                                    processed_items=i + 1
-                                )
-                            except TaskCancelledException:
-                                # 任务被取消，记录并退出
-                                logger.warning(f"⚠️ 财务数据同步任务被用户取消 (已处理 {i + 1}/{len(symbols)})")
-                                stats["end_time"] = datetime.utcnow()
-                                stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-                                stats["cancelled"] = True
-                                raise
+                        # 进度日志（每 50 只输出一次）
+                        if processed_count % 50 == 0:
+                            progress = int(processed_count / len(symbols) * 100)
+                            logger.info(f"📈 财务数据同步进度: {processed_count}/{len(symbols)} ({progress}%) "
+                                       f"(成功: {stats['success_count']}, 错误: {stats['error_count']}, 无新数据: {stats['skipped_count']}, 需更新: {need_full_sync_count})")
 
-                except Exception as e:
-                    stats["error_count"] += 1
-                    stats["errors"].append({
-                        "code": symbol,
-                        "error": str(e),
-                        "context": "sync_financial_data"
-                    })
-                    logger.error(f"❌ {symbol} 财务数据同步失败: {e}")
+                    except Exception as e:
+                        logger.error(f"❌ 更新 {symbol} 失败: {e}")
+                        stats["error_count"] += 1
+                        processed_count += 1
+
+            update_tasks = [update_one(s) for s in symbols]
+            await asyncio.gather(*update_tasks, return_exceptions=True)
+
+            logger.info(f"📊 阶段二完成：需完整更新 {need_full_sync_count} 只")
 
             # 完成统计
             stats["end_time"] = datetime.utcnow()
