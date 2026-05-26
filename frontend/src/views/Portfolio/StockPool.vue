@@ -84,8 +84,8 @@
 
     <el-dialog v-model="auditDialog" title="审计历史" width="720px">
       <el-table :data="audits" size="small" v-loading="auditLoading">
-        <el-table-column prop="created_at" label="时间" min-width="170">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <el-table-column prop="event_date" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatTime(row.event_date) }}</template>
         </el-table-column>
         <el-table-column prop="action" label="动作" width="140" />
         <el-table-column prop="actor" label="操作者" width="150" />
@@ -250,6 +250,10 @@ const openDetail = (item: StockPoolItem) => {
 
 const formatTime = (value?: string) => {
   if (!value) return '-'
+  // event_date is date-only string like "2026-05-22"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value
+  }
   return new Date(value).toLocaleString()
 }
 
