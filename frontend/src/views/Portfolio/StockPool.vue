@@ -35,21 +35,22 @@
               :class="{ matched: isRuleMatched(item.id) }"
               @click="showAudit(item)"
             >
-              <div class="row-left">
-                <span class="stock-dot" :class="sourceColor(item.source)" />
-                <div class="stock-info">
+              <div class="row-top">
+                <div class="row-left">
+                  <span class="stock-dot" :class="sourceColor(item.source)" />
                   <span class="stock-name">{{ item.stock_name || item.wind_code }}</span>
                   <span class="stock-code">{{ item.wind_code }}</span>
+                  <el-tag size="small" :type="sourceTag(item.source).type" class="source-tag">{{ sourceTag(item.source).label }}</el-tag>
+                  <el-tag size="small" :type="crowdingTagType(item)" class="crowding-tag">{{ crowdingLabel(item) }}</el-tag>
                 </div>
+                <div v-if="isRuleMatched(item.id)" class="matched-dot" />
               </div>
-              <div class="row-right">
-                <el-tag size="small" :type="sourceTag(item.source).type" class="source-tag">{{ sourceTag(item.source).label }}</el-tag>
-                <el-tag size="small" :type="crowdingTagType(item)" class="crowding-tag">{{ crowdingLabel(item) }}</el-tag>
-                <div class="metrics">
-                  <span>贝叶斯 {{ pct(metric(item, 'bayesian')) }}</span>
-                  <span>共识 {{ pct(metric(item, 'consensus')) }}</span>
-                  <span>产品 {{ metric(item, 'product_count') }}</span>
-                </div>
+              <div class="row-bottom">
+                <span class="metric">贝叶斯 {{ pct(metric(item, 'bayesian')) }}</span>
+                <span class="metric-sep">|</span>
+                <span class="metric">共识 {{ pct(metric(item, 'consensus')) }}</span>
+                <span class="metric-sep">|</span>
+                <span class="metric">产品 {{ metric(item, 'product_count') }}</span>
               </div>
             </div>
           </div>
@@ -339,16 +340,15 @@ onMounted(loadAll)
   }
 
   .stock-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 7px 10px;
     background: var(--el-fill-color-blank);
     cursor: pointer;
     transition: background 0.15s;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
 
     &:hover {
       background: var(--el-fill-color-light);
@@ -360,12 +360,20 @@ onMounted(loadAll)
     }
   }
 
+  .row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
   .row-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
-    flex: 0 0 auto;
+    flex: 1;
+    overflow: hidden;
   }
 
   .stock-dot {
@@ -381,13 +389,6 @@ onMounted(loadAll)
     &.dot-gray { background: #d1d5db; }
   }
 
-  .stock-info {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-  }
-
   .stock-name {
     font-size: 13px;
     font-weight: 500;
@@ -395,41 +396,57 @@ onMounted(loadAll)
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 90px;
+    max-width: 80px;
+    flex-shrink: 1;
   }
 
   .stock-code {
     font-size: 11px;
     color: var(--el-text-color-secondary);
-  }
-
-  .row-right {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    justify-content: flex-end;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .source-tag {
     flex-shrink: 0;
+    font-size: 11px !important;
+    padding: 0 4px !important;
+    height: 18px !important;
+    line-height: 16px !important;
   }
 
   .crowding-tag {
     flex-shrink: 0;
+    font-size: 11px !important;
+    padding: 0 4px !important;
+    height: 18px !important;
+    line-height: 16px !important;
   }
 
-  .metrics {
+  .matched-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--el-color-success);
+    flex-shrink: 0;
+  }
+
+  .row-bottom {
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: var(--el-text-color-regular);
+    gap: 4px;
+    color: var(--el-text-color-secondary);
     font-size: 11px;
-    white-space: nowrap;
+    padding-left: 14px;
+  }
 
-    span { display: inline-block; }
-    span::before { content: ' '; }
-    span:first-child::before { content: ''; }
+  .metric {
+    white-space: nowrap;
+  }
+
+  .metric-sep {
+    color: var(--el-border-color);
+    margin: 0 1px;
   }
 }
 
