@@ -448,6 +448,22 @@ onMounted(loadAll)
     color: var(--el-border-color);
     margin: 0 1px;
   }
+
+  /* Custom scrollbar - thin and subtle */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--el-border-color-light);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--el-border-color);
+  }
 }
 
 @media (max-width: 768px) {
