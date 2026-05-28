@@ -33,21 +33,24 @@
               :key="item.id"
               class="stock-row"
               :class="{ matched: isRuleMatched(item.id) }"
+              @click="showAudit(item)"
             >
-              <div class="row-main">
-                <div class="stock-id">
-                  <el-link type="primary" size="small" @click="openDetail(item)">{{ item.stock_name || item.wind_code }}</el-link>
-                  <span class="wind-code">{{ item.wind_code }}</span>
-                  <el-tag v-if="isRuleMatched(item.id)" size="small" type="success" class="ml-2">命中</el-tag>
+              <div class="row-top">
+                <div class="row-left">
+                  <span class="stock-dot" :class="sourceColor(item.source)" />
+                  <span class="stock-name">{{ item.stock_name || item.wind_code }}</span>
+                  <span class="stock-code">{{ item.wind_code }}</span>
+                  <el-tag size="small" :type="sourceTag(item.source).type" class="source-tag">{{ sourceTag(item.source).label }}</el-tag>
+                  <el-tag size="small" :type="crowdingTagType(item)" class="crowding-tag">{{ crowdingLabel(item) }}</el-tag>
                 </div>
-                <div class="stock-meta">
-                  <el-tag size="small" :type="sourceTag(item.source).type">{{ sourceTag(item.source).label }}</el-tag>
-                  <span class="metric">Bayes {{ pct(metric(item, 'bayesian')) }}</span>
-                  <span class="metric">共识 {{ pct(metric(item, 'consensus')) }}</span>
-                  <span class="metric">产品 {{ metric(item, 'product_count') }}</span>
-                  <span class="metric">拥挤 {{ metric(item, 'crowding_level') }}</span>
-                </div>
-                <el-button link size="small" type="primary" @click="showAudit(item)">审计</el-button>
+                <div v-if="isRuleMatched(item.id)" class="matched-dot" />
+              </div>
+              <div class="row-bottom">
+                <span class="metric">贝叶斯 {{ pct(metric(item, 'bayesian')) }}</span>
+                <span class="metric-sep">|</span>
+                <span class="metric">共识 {{ pct(metric(item, 'consensus')) }}</span>
+                <span class="metric-sep">|</span>
+                <span class="metric">产品 {{ metric(item, 'product_count') }}</span>
               </div>
             </div>
           </div>
@@ -76,8 +79,8 @@
 
     <el-dialog v-model="auditDialog" title="审计历史" width="720px">
       <el-table :data="audits" size="small" v-loading="auditLoading">
-        <el-table-column prop="event_date" label="时间" min-width="170">
-          <template #default="{ row }">{{ formatTime(row.event_date) }}</template>
+        <el-table-column prop="created_at" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column prop="action" label="动作" width="140" />
         <el-table-column prop="actor" label="操作者" width="150" />
@@ -215,6 +218,30 @@ const warningLevel = (item: StockPoolItem) => {
   return level === 'DANGER' || level === 'HIGH' ? `拥挤${level}` : ''
 }
 
+const sourceColor = (source: string) => {
+  const map: Record<string, string> = {
+    argus: 'dot-green',
+    smart_money_institution: 'dot-blue',
+    smart_money_retail: 'dot-yellow',
+    smart_money_kol: 'dot-orange',
+    manual: 'dot-gray',
+  }
+  return map[source] || 'dot-gray'
+}
+
+const crowdingTagType = (item: StockPoolItem) => {
+  const level = String(metric(item, 'crowding_level'))
+  if (level === 'DANGER' || level === 'HIGH') return 'danger'
+  if (level === 'MEDIUM') return 'warning'
+  return 'info'
+}
+
+const crowdingLabel = (item: StockPoolItem) => {
+  const map: Record<string, string> = { LOW: '低拥挤', MEDIUM: '中拥挤', HIGH: '高拥挤', DANGER: '危险' }
+  const level = String(metric(item, 'crowding_level'))
+  return map[level] || level
+}
+
 const isRuleMatched = (id: string) => Boolean(lastRun.value?.items?.some((item) => item.id === id))
 
 const ruleTooltip = (id: string) => {
@@ -223,6 +250,10 @@ const ruleTooltip = (id: string) => {
   return Object.entries(item.thresholds || {})
     .map(([key, value]) => `${key}: ${value}`)
     .join(' / ')
+}
+
+const openDetail = (item: StockPoolItem) => {
+  ElMessage.info(`${item.stock_name || item.wind_code} 当前位于 ${item.pool_zone}`)
 }
 
 const showAudit = async (item: StockPoolItem) => {
@@ -236,16 +267,8 @@ const showAudit = async (item: StockPoolItem) => {
   }
 }
 
-const openDetail = (item: StockPoolItem) => {
-  ElMessage.info(`${item.stock_name || item.wind_code} 当前位于 ${item.pool_zone}`)
-}
-
 const formatTime = (value?: string) => {
   if (!value) return '-'
-  // event_date is date-only string like "2026-05-22"
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value
-  }
   return new Date(value).toLocaleString()
 }
 
@@ -311,14 +334,25 @@ onMounted(loadAll)
   .stock-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
+    max-height: 480px;
+    overflow-y: auto;
   }
 
   .stock-row {
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 7px 10px;
     background: var(--el-fill-color-blank);
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+
+    &:hover {
+      background: var(--el-fill-color-light);
+    }
 
     &.matched {
       border-color: var(--el-color-success);
@@ -326,40 +360,93 @@ onMounted(loadAll)
     }
   }
 
-  .row-main {
+  .row-top {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 6px;
   }
 
-  .stock-id {
+  .row-left {
     display: flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
-
-    .wind-code {
-      color: var(--el-text-color-secondary);
-      font-size: 12px;
-    }
-
-    .ml-2 {
-      margin-left: 4px;
-    }
-  }
-
-  .stock-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     flex: 1;
-    min-width: 0;
-    flex-wrap: wrap;
+    overflow: hidden;
+  }
 
-    .metric {
-      color: var(--el-text-color-secondary);
-      font-size: 12px;
-    }
+  .stock-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.dot-green { background: #22c55e; }
+    &.dot-blue { background: #3b82f6; }
+    &.dot-yellow { background: #eab308; }
+    &.dot-orange { background: #f97316; }
+    &.dot-gray { background: #d1d5db; }
+  }
+
+  .stock-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--el-text-color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80px;
+    flex-shrink: 1;
+  }
+
+  .stock-code {
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .source-tag {
+    flex-shrink: 0;
+    font-size: 11px !important;
+    padding: 0 4px !important;
+    height: 18px !important;
+    line-height: 16px !important;
+  }
+
+  .crowding-tag {
+    flex-shrink: 0;
+    font-size: 11px !important;
+    padding: 0 4px !important;
+    height: 18px !important;
+    line-height: 16px !important;
+  }
+
+  .matched-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--el-color-success);
+    flex-shrink: 0;
+  }
+
+  .row-bottom {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--el-text-color-secondary);
+    font-size: 11px;
+    padding-left: 14px;
+  }
+
+  .metric {
+    white-space: nowrap;
+  }
+
+  .metric-sep {
+    color: var(--el-border-color);
+    margin: 0 1px;
   }
 }
 
