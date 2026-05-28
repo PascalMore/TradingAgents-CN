@@ -34,27 +34,19 @@
               class="stock-row"
               :class="{ matched: isRuleMatched(item.id) }"
             >
-              <div class="row-top">
+              <div class="row-main">
                 <div class="stock-id">
-                  <el-link type="primary" @click="openDetail(item)">{{ item.stock_name || item.wind_code }}</el-link>
-                  <span>{{ item.wind_code }}</span>
+                  <el-link type="primary" size="small" @click="openDetail(item)">{{ item.stock_name || item.wind_code }}</el-link>
+                  <span class="wind-code">{{ item.wind_code }}</span>
+                  <el-tag v-if="isRuleMatched(item.id)" size="small" type="success" class="ml-2">命中</el-tag>
                 </div>
-                <el-tooltip v-if="isRuleMatched(item.id)" placement="top" :content="ruleTooltip(item.id)">
-                  <el-tag size="small" type="success">命中</el-tag>
-                </el-tooltip>
-              </div>
-              <div class="row-tags">
-                <el-tag size="small" :type="sourceTag(item.source).type">{{ sourceTag(item.source).label }}</el-tag>
-                <el-tag v-if="item.source_detail" size="small" effect="plain">{{ item.source_detail }}</el-tag>
-                <el-tag v-if="warningLevel(item)" size="small" type="danger">{{ warningLevel(item) }}</el-tag>
-              </div>
-              <div class="metrics">
-                <span>Bayes {{ pct(metric(item, 'bayesian')) }}</span>
-                <span>共识 {{ pct(metric(item, 'consensus')) }}</span>
-                <span>产品 {{ metric(item, 'product_count') }}</span>
-                <span>拥挤 {{ metric(item, 'crowding_level') }}</span>
-              </div>
-              <div class="row-actions">
+                <div class="stock-meta">
+                  <el-tag size="small" :type="sourceTag(item.source).type">{{ sourceTag(item.source).label }}</el-tag>
+                  <span class="metric">Bayes {{ pct(metric(item, 'bayesian')) }}</span>
+                  <span class="metric">共识 {{ pct(metric(item, 'consensus')) }}</span>
+                  <span class="metric">产品 {{ metric(item, 'product_count') }}</span>
+                  <span class="metric">拥挤 {{ metric(item, 'crowding_level') }}</span>
+                </div>
                 <el-button link size="small" type="primary" @click="showAudit(item)">审计</el-button>
               </div>
             </div>
@@ -319,13 +311,13 @@ onMounted(loadAll)
   .stock-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
   }
 
   .stock-row {
     border: 1px solid var(--el-border-color-lighter);
-    border-radius: 8px;
-    padding: 10px;
+    border-radius: 6px;
+    padding: 8px 10px;
     background: var(--el-fill-color-blank);
 
     &.matched {
@@ -334,48 +326,40 @@ onMounted(loadAll)
     }
   }
 
-  .row-top,
-  .row-tags,
-  .metrics,
-  .row-actions {
+  .row-main {
     display: flex;
     align-items: center;
-    gap: 6px;
-  }
-
-  .row-top {
-    justify-content: space-between;
-    margin-bottom: 8px;
+    gap: 8px;
   }
 
   .stock-id {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 6px;
     min-width: 0;
 
-    span {
+    .wind-code {
       color: var(--el-text-color-secondary);
       font-size: 12px;
     }
+
+    .ml-2 {
+      margin-left: 4px;
+    }
   }
 
-  .row-tags {
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  .metrics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .stock-meta {
+    display: flex;
+    align-items: center;
     gap: 6px;
-    color: var(--el-text-color-regular);
-    font-size: 12px;
-  }
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
 
-  .row-actions {
-    justify-content: flex-end;
-    margin-top: 6px;
+    .metric {
+      color: var(--el-text-color-secondary);
+      font-size: 12px;
+    }
   }
 }
 
