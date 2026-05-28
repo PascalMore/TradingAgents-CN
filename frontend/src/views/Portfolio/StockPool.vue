@@ -310,32 +310,29 @@ onMounted(loadAll)
   }
 
   .zone-card {
-    min-height: 520px;
+    height: 520px;
     border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    :deep(.el-card__body) {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
   }
 
   .zone-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .zone-title {
-    font-weight: 650;
-    margin-right: 8px;
-  }
-
-  .zone-sub {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
+    flex-shrink: 0;
   }
 
   .stock-list {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    max-height: 480px;
     overflow-y: auto;
   }
 
