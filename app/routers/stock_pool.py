@@ -57,6 +57,7 @@ async def list_stock_pool(
     source: Optional[StockPoolSource] = Query(None),
     status_filter: Optional[str] = Query("active", alias="status"),
     wind_code: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query("bayesian", alias="sort"),  # bayesian | entry_date
     limit: int = Query(100, ge=1, le=200),
     cursor: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
@@ -68,6 +69,7 @@ async def list_stock_pool(
         source=source.value if source else None,
         status=status_filter,
         wind_code=wind_code,
+        sort_by=sort_by,
         limit=limit,
         cursor=cursor,
     )
