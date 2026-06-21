@@ -46,9 +46,9 @@
                 <div v-if="isRuleMatched(item.id)" class="matched-dot" />
               </div>
               <div class="row-bottom">
-                <span class="metric">贝叶斯 {{ pct(metric(item, 'bayesian')) }}</span>
+                <span class="metric">贝叶斯 {{ dec(metric(item, 'bayesian')) }}</span>
                 <span class="metric-sep">|</span>
-                <span class="metric">共识 {{ pct(metric(item, 'consensus')) }}</span>
+                <span class="metric">共识 {{ dec(metric(item, 'consensus')) }}</span>
                 <span class="metric-sep">|</span>
                 <span class="metric">产品 {{ metric(item, 'product_count') }}</span>
               </div>
@@ -79,8 +79,8 @@
 
     <el-dialog v-model="auditDialog" title="审计历史" width="720px">
       <el-table :data="audits" size="small" v-loading="auditLoading">
-        <el-table-column prop="created_at" label="时间" min-width="170">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <el-table-column prop="event_date" label="日期" min-width="120">
+          <template #default="{ row }">{{ formatTime(row.event_date) }}</template>
         </el-table-column>
         <el-table-column prop="action" label="动作" width="140" />
         <el-table-column prop="actor" label="操作者" width="150" />
@@ -176,7 +176,14 @@ const runDemotion = async (dryRun: boolean) => {
   if (!dryRun) await loadAll()
 }
 
-const zoneItems = (zone: ZoneKey) => items.value.filter((item) => item.pool_zone === zone)
+const zoneItems = (zone: ZoneKey) =>
+  items.value
+    .filter((item) => item.pool_zone === zone)
+    .sort((a, b) => {
+      const bayesDiff = metric(b, 'bayesian') - metric(a, 'bayesian')
+      if (Math.abs(bayesDiff) > 0.001) return bayesDiff
+      return metric(b, 'product_count') - metric(a, 'product_count')
+    })
 
 const sourceTag = (source: string) => {
   const map: Record<string, { label: string; type: 'success' | 'primary' | 'warning' | 'danger' | 'info' }> = {
@@ -211,7 +218,7 @@ const metric = (item: StockPoolItem, key: string) => {
   return ''
 }
 
-const pct = (value: unknown) => `${(Number(value || 0) * 100).toFixed(0)}%`
+const dec = (value: unknown) => (Number(value || 0)).toFixed(2)
 
 const warningLevel = (item: StockPoolItem) => {
   const level = String(metric(item, 'crowding_level'))
