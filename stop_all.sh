@@ -6,31 +6,21 @@ cd "$SCRIPT_DIR"
 
 echo "🛑 停止 TradingAgents-CN..."
 
-# 读取 PID 并停止
-if [ -f logs/backend.pid ]; then
-    BACKEND_PID=$(cat logs/backend.pid)
-    if ps -p $BACKEND_PID > /dev/null 2>&1; then
-        kill $BACKEND_PID
-        echo "✅ 后端已停止 (PID: $BACKEND_PID)"
+# 通过 PID 文件停止（优先）
+for pidfile in logs/backend.pid logs/frontend.pid; do
+    if [ -f "$pidfile" ]; then
+        PID=$(cat "$pidfile")
+        if [ -n "$PID" ] && ps -p $PID > /dev/null 2>&1; then
+            # 杀掉该 PID 的整个进程组
+            kill -- -$PID 2>/dev/null || kill $PID 2>/dev/null
+            echo "✅ 已停止 (PID: $PID)"
+        fi
+        rm -f "$pidfile"
     fi
-    rm logs/backend.pid
-fi
+done
 
-if [ -f logs/frontend.pid ]; then
-    FRONTEND_PID=$(cat logs/frontend.pid)
-    if ps -p $FRONTEND_PID > /dev/null 2>&1; then
-        kill $FRONTEND_PID
-        echo "✅ 前端已停止 (PID: $FRONTEND_PID)"
-    fi
-    rm logs/frontend.pid
-fi
-
-# 清理残留进程
-pkill -f "python.*app.main" 2>/dev/null && echo "🧹 清理后端残留进程"
-pkill -f "vite" 2>/dev/null && echo "🧹 清理 Vite 前端残留进程"
-
-# 按端口清理前端（备用方案）
-for port in 3000 3001 3002 3003 3004 5173; do
+# 按端口清理残留进程（精确匹配，不用 pkill -f）
+for port in 8000 3000 3001 5173; do
     pid=$(lsof -ti :$port 2>/dev/null)
     if [ -n "$pid" ]; then
         kill $pid 2>/dev/null && echo "🧹 清理端口 $port 残留进程 (PID: $pid)"
