@@ -739,29 +739,32 @@ class TushareSyncService:
             if symbols is None:
                 # 查询所有A股股票（兼容不同的数据结构），排除退市股票
                 # 优先使用 market_info.market，降级到 category 字段
-                cursor = self.db.stock_basic_info.find(
-                    {
-                        "$and": [
-                            {
-                                "$or": [
-                                    {"market_info.market": "CN"},  # 新数据结构
-                                    {"category": "stock_cn"},      # 旧数据结构
-                                    {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
-                                ]
-                            },
-                            # 排除退市股票
-                            {
-                                "$or": [
-                                    {"status": {"$ne": "D"}},  # status 不是 D（退市）
-                                    {"status": {"$exists": False}}  # 或者 status 字段不存在
-                                ]
-                            }
-                        ]
-                    },
-                    {"code": 1}
-                )
-                symbols = [doc["code"] async for doc in cursor]
-                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票（已排除退市股票）")
+                # 用 aggregation pipeline 去重，避免同一 code 在多个数据源（tushare/akshare）
+                # 各存一条导致的重复处理。原 find() 会返回 11073 条 doc (5,538 distinct codes × 2)。
+                base_filter = {
+                    "$and": [
+                        {
+                            "$or": [
+                                {"market_info.market": "CN"},  # 新数据结构
+                                {"category": "stock_cn"},      # 旧数据结构
+                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                            ]
+                        },
+                        # 排除退市股票
+                        {
+                            "$or": [
+                                {"status": {"$ne": "D"}},  # status 不是 D（退市）
+                                {"status": {"$exists": False}}  # 或者 status 字段不存在
+                            ]
+                        }
+                    ]
+                }
+                pipeline = [
+                    {"$match": base_filter},
+                    {"$group": {"_id": "$code"}}
+                ]
+                symbols = [doc["_id"] async for doc in self.db.stock_basic_info.aggregate(pipeline)]
+                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只独立股票（已排除退市股票 + 去重）")
 
             stats["total_processed"] = len(symbols)
 
