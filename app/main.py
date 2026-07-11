@@ -377,7 +377,7 @@ async def lifespan(app: FastAPI):
             name="指数基础信息同步（Tushare）",
             kwargs={"force_update": False}
         )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_BASIC_INFO_SYNC_ENABLED):
+        if not settings.TUSHARE_UNIFIED_ENABLED:
             scheduler.pause_job("tushare_index_basic_info_sync")
             logger.info(f"⏸️ Tushare指数信息同步已添加但暂停: {settings.TUSHARE_INDEX_INFO_SYNC_CRON}")
         else:
@@ -386,21 +386,21 @@ async def lifespan(app: FastAPI):
         # 股票行业分类映射同步任务
         scheduler.add_job(
             run_stock_sector_info_sync,
-            CronTrigger.from_crontab("30 23 * * 0", timezone=settings.TIMEZONE),
+            CronTrigger.from_crontab("0 2 * * 6", timezone=settings.TIMEZONE),
             id="stock_sector_info_sync",
             name="股票行业分类同步（Tushare）",
             kwargs={"classify_system": "SW"}
         )
         if not settings.TUSHARE_UNIFIED_ENABLED:
             scheduler.pause_job("stock_sector_info_sync")
-            logger.info("⏸️ 股票行业分类同步已添加但暂停: 10 2 * * *")
+            logger.info("⏸️ 股票行业分类同步已添加但暂停: 0 2 * * 6")
         else:
-            logger.info("📅 股票行业分类同步已配置: 10 2 * * *")
+            logger.info("📅 股票行业分类同步已配置: 0 2 * * 6")
 
         # 申万一级行业指数历史日线同步任务
         scheduler.add_job(
             run_sw_index_daily_sync,
-            CronTrigger.from_crontab("30 19 * * *", timezone=settings.TIMEZONE),
+            CronTrigger.from_crontab("30 19 * * 1-5", timezone=settings.TIMEZONE),
             id="sw_index_daily_sync",
             name="历史行业指数数据同步（AKShare）",
             kwargs={"force_full": False},
