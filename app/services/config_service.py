@@ -1289,8 +1289,7 @@ class ConfigService:
                 try:
                     logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
                     import tushare as ts
-                    ts.set_token(api_key)
-                    pro = ts.pro_api()
+                    pro = ts.pro_api(api_key)
                     # 获取交易日历（轻量级测试）
                     df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
 

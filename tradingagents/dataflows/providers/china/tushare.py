@@ -114,8 +114,7 @@ class TushareProvider(BaseStockDataProvider):
             if db_token:
                 try:
                     self.logger.info(f"🔄 [步骤3] 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
-                    ts.set_token(db_token)
-                    self.api = ts.pro_api()
+                    self.api = ts.pro_api(db_token)
 
                     # 测试连接 - 直接调用同步方法（不使用 asyncio.run）
                     try:
@@ -140,8 +139,7 @@ class TushareProvider(BaseStockDataProvider):
             if env_token:
                 try:
                     self.logger.info(f"🔄 [步骤4] 尝试使用 .env 中的 Tushare Token (超时: {test_timeout}秒)...")
-                    ts.set_token(env_token)
-                    self.api = ts.pro_api()
+                    self.api = ts.pro_api(env_token)
 
                     # 测试连接 - 直接调用同步方法（不使用 asyncio.run）
                     try:
@@ -190,8 +188,7 @@ class TushareProvider(BaseStockDataProvider):
             if db_token:
                 try:
                     self.logger.info(f"🔄 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
-                    ts.set_token(db_token)
-                    self.api = ts.pro_api()
+                    self.api = ts.pro_api(db_token)
 
                     # 测试连接（异步）- 使用超时
                     try:
@@ -220,8 +217,7 @@ class TushareProvider(BaseStockDataProvider):
             if env_token:
                 try:
                     self.logger.info(f"🔄 尝试使用 .env 中的 Tushare Token (超时: {test_timeout}秒)...")
-                    ts.set_token(env_token)
-                    self.api = ts.pro_api()
+                    self.api = ts.pro_api(env_token)
 
                     # 测试连接（异步）- 使用超时
                     try:
