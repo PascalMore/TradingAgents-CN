@@ -187,7 +187,10 @@ class TushareSyncService:
             for m in ["SW", "SSE", "SZSE", "MSCI"]:
             #for m in ["SW"]:
                 t_list = await self.provider.get_index_list(market=m)
-                index_list = index_list + t_list
+                if t_list:
+                    index_list.extend(t_list)
+                else:
+                    logger.warning(f"⚠️ {m} 指数列表为空，跳过")
             if not index_list:
                 logger.error("❌ 无法获取指数列表")
                 return stats

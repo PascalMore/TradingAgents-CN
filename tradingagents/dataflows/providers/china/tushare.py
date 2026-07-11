@@ -325,7 +325,7 @@ class TushareProvider(BaseStockDataProvider):
             index_list = []
             for _, row in df.iterrows():
                 #过滤到期的指数
-                if not row['exp_date']:
+                if pd.isna(row['exp_date']):
                     index_info = self.standardize_index_basic_info(row.to_dict())
                     index_list.append(index_info)
             
