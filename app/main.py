@@ -324,7 +324,11 @@ async def lifespan(app: FastAPI):
             if settings.SYNC_STOCK_BASICS_CRON:
                 # 如果提供了cron表达式
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    lambda: asyncio.run(
+                        multi_source_service.run_full_sync(
+                            force=False, preferred_sources=preferred_sources
+                        )
+                    ),
                     CronTrigger.from_crontab(settings.SYNC_STOCK_BASICS_CRON, timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
@@ -333,7 +337,11 @@ async def lifespan(app: FastAPI):
             else:
                 hh, mm = (settings.SYNC_STOCK_BASICS_TIME or "06:30").split(":")
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    lambda: asyncio.run(
+                        multi_source_service.run_full_sync(
+                            force=False, preferred_sources=preferred_sources
+                        )
+                    ),
                     CronTrigger(hour=int(hh), minute=int(mm), timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
