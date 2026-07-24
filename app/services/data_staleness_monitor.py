@@ -35,14 +35,35 @@ def _is_workday(now_local: datetime) -> bool:
     return now_local.weekday() < 5
 
 
+def _parse_updated_at(value: Any) -> datetime | None:
+    """Normalize BSON datetimes and ISO-8601 strings to UTC."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _latest_updated_at(db: Any) -> datetime | None:
-    """Read the newest valid ``updated_at`` value from ``stock_basic_info``."""
-    document = db[TARGET_COLLECTION].find_one(
-        {"updated_at": {"$type": "date"}},
-        sort=[("updated_at", -1)],
+    """Read and compare all BSON date/ISO string ``updated_at`` values."""
+    documents = db[TARGET_COLLECTION].find(
+        {"updated_at": {"$type": {"$in": ["date", "string"]}}},
         projection={"updated_at": 1},
     )
-    return document.get("updated_at") if document else None
+    parsed_values = (
+        parsed
+        for document in documents
+        if (parsed := _parse_updated_at(document.get("updated_at"))) is not None
+    )
+    return max(parsed_values, default=None)
 
 
 def _age_hours(updated_at: datetime, now_local: datetime) -> float:

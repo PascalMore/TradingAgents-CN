@@ -39,6 +39,7 @@ from app.routers import websocket_notifications as websocket_notifications_route
 from app.routers import scheduler as scheduler_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
+from app.services.data_staleness_monitor import check_staleness
 from app.services.scheduler_service import set_scheduler_instance
 from app.worker.tushare_sync_service import (
     run_tushare_basic_info_sync,
@@ -347,6 +348,15 @@ async def lifespan(app: FastAPI):
                     name="股票基础信息同步（多数据源）"
                 )
                 logger.info(f"📅 Stock basics sync scheduled daily at {settings.SYNC_STOCK_BASICS_TIME} ({settings.TIMEZONE})")
+
+        # 股票基础信息陈旧度监控：工作日同步窗口后检查，不依赖同步开关
+        scheduler.add_job(
+            check_staleness,
+            CronTrigger(hour=7, minute=0, day_of_week="mon-fri", timezone=settings.TIMEZONE),
+            id="stock_basic_info_staleness_monitor",
+            name="股票基础信息陈旧度监控",
+        )
+        logger.info("📅 股票基础信息陈旧度监控已配置: 工作日 07:00 (%s)", settings.TIMEZONE)
 
         # 实时行情入库任务（每N秒），内部自判交易时段
         if settings.QUOTES_INGEST_ENABLED:
