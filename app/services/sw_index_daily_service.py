@@ -243,7 +243,6 @@ class SwIndexDailyService:
                     "code": code,
                     "symbol": code,
                     "market": "CN",
-                    "name": self._clean_str(row.get("指数名称")),
                     "trade_date": trade_date,
                     "period": PERIOD,
                     "open": open_price,
@@ -262,6 +261,7 @@ class SwIndexDailyService:
                     "data_source": DATA_SOURCE,
                     "created_at": now,
                     "updated_at": now,
+                    "version": 1,
                 }
             ]
         except Exception as fallback_error:
@@ -338,7 +338,6 @@ class SwIndexDailyService:
                 "code": code,
                 "symbol": code,
                 "market": "CN",
-                "name": name,
                 "trade_date": row["trade_date"],
                 "period": PERIOD,
                 "open": open_price,
@@ -355,6 +354,7 @@ class SwIndexDailyService:
                 "data_source": DATA_SOURCE,
                 "created_at": now,
                 "updated_at": now,
+                "version": 1,
             }
             records.append(record)
         return records

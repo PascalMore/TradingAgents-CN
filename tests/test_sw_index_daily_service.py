@@ -222,8 +222,9 @@ async def test_sync_all_upserts_sw_l1_index_daily_quotes():
     assert doc["code"] == "801120"
     assert doc["symbol"] == "801120"
     assert doc["market"] == "CN"
-    assert doc["name"] == "食品饮料"
+    assert "name" not in doc
     assert doc["period"] == "daily"
+    assert doc["version"] == 1
     assert doc["open"] == 14966.82
     assert doc["high"] == 14972.07
     assert doc["low"] == 14807.05
@@ -311,8 +312,15 @@ async def test_sync_one_falls_back_to_realtime_when_incremental_history_empty():
     assert ak.realtime_calls == ["一级行业"]
 
     doc = db["index_daily_quotes"].docs[("801120.SI", "2026-05-21")]
-    assert doc["name"] == "食品饮料"
+    assert doc["full_symbol"] == "801120.SI"
+    assert doc["code"] == "801120"
+    assert doc["symbol"] == "801120"
+    assert doc["market"] == "CN"
+    assert "name" not in doc
     assert doc["trade_date"] == "2026-05-21"
+    assert doc["period"] == "daily"
+    assert doc["data_source"] == "akshare"
+    assert doc["version"] == 1
     assert doc["open"] == 14900.0
     assert doc["high"] == 15050.0
     assert doc["low"] == 14880.0
